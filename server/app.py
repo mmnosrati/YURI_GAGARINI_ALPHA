@@ -28,15 +28,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from core.engine_ripgrep import RipgrepEngine
 from core.resource_guard import ResourceGuard
 from core.search_manager import SearchConfig
 from .auth import AuthManager
 from .config import ServerConfig, get_server_config, save_server_config
 from .file_manager import FileManager
 from .job_queue import JobQueueManager
+from .logger import read_recent_logs, setup_rotating_logger
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("yurigagarin.server.app")
+logger = setup_rotating_logger()
 
 app = FastAPI(
     title="YURI GAGARIN ALPHA",
@@ -205,6 +206,13 @@ async def complete_upload(payload: Dict[str, Any], authorized: bool = Depends(re
         raise HTTPException(status_code=400, detail=str(e))
 
 
+# --- Logs & Diagnostics Endpoints ---
+@app.get("/api/logs/recent")
+async def get_recent_server_logs(lines: int = Query(200, ge=10, le=2000), authorized: bool = Depends(require_admin)):
+    """Retrieves up to 2-day historical server logs for admin diagnostics."""
+    return {"logs": read_recent_logs(max_lines=lines)}
+
+
 # --- Search Job Management Endpoints ---
 @app.post("/api/jobs/start")
 async def start_search_job(payload: Dict[str, Any], authorized: bool = Depends(require_admin)):
@@ -228,6 +236,7 @@ async def start_search_job(payload: Dict[str, Any], authorized: bool = Depends(r
         target_path=target_path,
         patterns=patterns,
         output_file=out_file,
+        engine_type=str(payload.get("engine_type", "ripgrep")),
         is_regex=bool(payload.get("is_regex", False)),
         case_sensitive=bool(payload.get("case_sensitive", False)),
         extract_only=bool(payload.get("extract_only", True)),
@@ -236,6 +245,10 @@ async def start_search_job(payload: Dict[str, Any], authorized: bool = Depends(r
         detailed_stats=bool(payload.get("detailed_stats", True)),
         low_memory_mode=bool(payload.get("low_memory_mode", False)),
         compress_algo=str(payload.get("compress_algo", "none")),
+        rg_threads=int(payload.get("rg_threads", 0)),
+        rg_mmap=bool(payload.get("rg_mmap", True)),
+        rg_pcre2=bool(payload.get("rg_pcre2", True)),
+        rg_smart_case=bool(payload.get("rg_smart_case", False)),
     )
 
     job = job_queue.start_job(cfg)

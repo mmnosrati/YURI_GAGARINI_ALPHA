@@ -53,6 +53,10 @@
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
         Jobs & History
       </li>
+      <li class="nav-item" data-tab="serverLogsTab">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+        Server Logs (48h)
+      </li>
       <li class="nav-item" data-tab="settingsTab">
         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
         Settings & Telegram
@@ -139,9 +143,39 @@
               <div class="form-group">
                 <label class="form-label">Search Engine:</label>
                 <select id="searchEngineSelect" class="select-input">
-                  <option value="aho">Aho-Corasick (Vectorized Multi-Literal - Maximum Speed)</option>
-                  <option value="regex">PCRE2 / JIT Regex (Advanced Pattern Matching)</option>
+                  <option value="ripgrep" selected>Ripgrep (Rust SIMD Multi-Threaded - Extreme Speed)</option>
+                  <option value="aho">Aho-Corasick (Memory-Bounded Multi-Literal)</option>
+                  <option value="regex">PCRE2 / JIT Regex Engine</option>
                 </select>
+              </div>
+            </div>
+
+            <!-- Ripgrep Specific Tuning Options -->
+            <div id="ripgrepTuningPanel" class="grid-3" style="background: var(--bg-hover); padding: 14px 18px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); margin-bottom: 18px;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label class="form-label" style="font-size: 12.5px;">Ripgrep Concurrency Threads:</label>
+                <select id="rgThreadsSelect" class="select-input" style="padding: 6px 10px; font-size: 13px;">
+                  <option value="0" selected>Auto (All CPU Cores)</option>
+                  <option value="1">1 Thread (Single Core)</option>
+                  <option value="2">2 Threads</option>
+                  <option value="4">4 Threads</option>
+                  <option value="8">8 Threads</option>
+                  <option value="16">16 Threads</option>
+                  <option value="32">32 Threads</option>
+                </select>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 8px; justify-content: center;">
+                <label class="checkbox-group" style="font-size: 13px;">
+                  <input type="checkbox" id="rgMmapCheck" checked> Memory-Mapped I/O (--mmap)
+                </label>
+                <label class="checkbox-group" style="font-size: 13px;">
+                  <input type="checkbox" id="rgPcre2Check" checked> PCRE2 JIT Acceleration
+                </label>
+              </div>
+              <div style="display: flex; align-items: center;">
+                <label class="checkbox-group" style="font-size: 13px;">
+                  <input type="checkbox" id="rgSmartCaseCheck"> Smart Case Matching
+                </label>
               </div>
             </div>
 
@@ -294,7 +328,26 @@
         </div>
       </section>
 
-      <!-- TAB 6: SETTINGS & TELEGRAM -->
+      <!-- TAB 6: SERVER LOGS & DIAGNOSTICS (48H) -->
+      <section id="serverLogsTab" class="tab-pane">
+        <div class="card">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <div class="card-title" style="margin-bottom: 0;">Server System & Debug Logs (Last 48 Hours)</div>
+            <div style="display: flex; gap: 10px;">
+              <select id="logLinesSelect" class="select-input" style="width: 140px; padding: 6px 10px; font-size: 12.5px;">
+                <option value="100">100 lines</option>
+                <option value="250" selected>250 lines</option>
+                <option value="500">500 lines</option>
+                <option value="1000">1000 lines</option>
+              </select>
+              <button id="btnRefreshServerLogs" class="btn btn-secondary" style="padding: 6px 12px; font-size: 12.5px;">Refresh Logs</button>
+            </div>
+          </div>
+          <div id="serverLogTerminal" class="terminal-window" style="height: 520px; color: #67E8F9;">Loading server logs...</div>
+        </div>
+      </section>
+
+      <!-- TAB 7: SETTINGS & TELEGRAM -->
       <section id="settingsTab" class="tab-pane">
         <div class="grid-2">
           <div class="card">

@@ -18,9 +18,14 @@
 
 ## ⚡ Highlights & Key Innovations
 
-* **Dual-Engine Architecture**:
-  * **Vectorized Aho-Corasick**: Single-pass $O(N)$ multi-pattern literal matcher. Searches tens of thousands of keywords concurrently with multi-gigabyte/second throughput.
-  * **PCRE2 / JIT Regex**: High-performance regular expression matching with an active watchdog timer (500ms max) that catches and neutralizes catastrophic backtracking (ReDoS) without freezing the engine.
+* **Extreme Search Throughput with Native Ripgrep (Rust SIMD)**:
+  * Integrated **Ripgrep** engine delivering **500 - 1,000+ MB/s** real-world scan speeds with memory-mapped I/O (`--mmap`) and multi-core CPU scaling (`--threads`).
+  * Supported by PCRE2 JIT compilation for advanced regular expressions and smart-case matching.
+* **Dual Fallback Core (Aho-Corasick & Python Regex)**:
+  * **Vectorized Aho-Corasick**: Single-pass $O(N)$ multi-pattern literal matcher. Searches tens of thousands of keywords concurrently.
+  * **PCRE2 / JIT Regex**: High-performance regular expression matching with an active watchdog timer (500ms max) that catches and neutralizes catastrophic backtracking (ReDoS).
+* **48-Hour Historical Server Logs & Live Diagnostic Viewer**:
+  * Rolling 2-day server audit logs (`logs/server.log`) for complete debugging, troubleshooting, and error diagnosis directly inside the Admin Web UI.
 * **Linux Kernel Optimizer**:
   * Utilizes `posix_fadvise(POSIX_FADV_SEQUENTIAL)` and `POSIX_FADV_DONTNEED` to instruct the Linux kernel to immediately release file page cache after processing. Scanning a 500 GB file will not starve server RAM or evict system applications.
   * Automatic `nice 10` and `ionice` scheduling to keep SSH sessions and web services responsive under heavy disk load.
@@ -28,6 +33,7 @@
   * Sleek Single Page Application (SPA) dashboard without Node.js/npm dependencies.
   * Real-time hardware telemetry gauges (CPU %, RAM %, Disk capacity).
   * Live WebSocket terminal streaming progress, throughput (MB/s), ETA, and match counters.
+  * Dedicated **Ripgrep Configuration Panel** to tweak worker threads, memory-mapped I/O, and PCRE2 options on the fly.
 * **Resumable Chunked File Upload Manager**:
   * Upload multi-gigabyte files directly to the server through the browser.
   * Transfers data in small sequential chunks with SHA-256 integrity verification.

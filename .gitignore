@@ -29,6 +29,7 @@ logs/
 output/
 yurigagarin_checkpoints/
 temp_uploads/
+bin/rg.exe
 *.pid
 word_finder_bot_token.txt
 word_finder_chat_id.txt

@@ -20,6 +20,7 @@ from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
 from .checkpoint import CheckpointManager, CheckpointState
 from .engine_aho import AhoCorasickEngine, AhoMatch
 from .engine_regex import RegexEngine, RegexMatch
+from .engine_ripgrep import RipgrepEngine, RipgrepOptions
 from .resource_guard import ResourceGuard, SystemProfile
 
 logger = logging.getLogger("yurigagarin.manager")
@@ -52,6 +53,7 @@ class SearchConfig:
     target_path: str
     patterns: List[str]
     output_file: str
+    engine_type: str = "ripgrep"  # "ripgrep", "aho", "regex"
     is_regex: bool = False
     case_sensitive: bool = False
     extract_only: bool = True
@@ -64,6 +66,11 @@ class SearchConfig:
     compress_algo: str = "none"  # "none", "gzip", "zstd", "lz4"
     compress_level: int = 6
     job_id: Optional[str] = None
+    # Ripgrep specific
+    rg_threads: int = 0
+    rg_mmap: bool = True
+    rg_pcre2: bool = True
+    rg_smart_case: bool = False
 
 
 @dataclass
@@ -178,7 +185,57 @@ class SearchManager:
             "Regex" if self.config.is_regex else "Aho-Corasick",
         )
 
-        # Initialize engines
+        # Check if Ripgrep can be utilized for extreme throughput
+        rg_engine = RipgrepEngine()
+        use_rg = (self.config.engine_type == "ripgrep" or self.config.engine_type == "") and rg_engine.is_available()
+
+        if use_rg:
+            logger.info("Using Ripgrep Native Rust Engine for ultra-fast multi-GB scanning.")
+            rg_opts = RipgrepOptions(
+                threads=self.config.rg_threads or (self.config.num_workers or 0),
+                mmap=self.config.rg_mmap,
+                pcre2=self.config.rg_pcre2,
+                smart_case=self.config.rg_smart_case,
+                case_sensitive=self.config.case_sensitive,
+                extract_only=self.config.extract_only,
+                hidden=not self.config.skip_hidden,
+                no_ignore=True,
+            )
+
+            total_matches, elapsed = rg_engine.execute_stream(
+                patterns=self.config.patterns,
+                target_path=str(target),
+                output_file=output_path,
+                options=rg_opts,
+                is_regex=self.config.is_regex,
+            )
+
+            # Post-process output (compression if enabled)
+            final_output = output_path
+            if self.config.compress_algo != "none" and output_path.exists():
+                final_output = self._compress_file(output_path, self.config.compress_algo, self.config.compress_level)
+
+            mb_scanned = total_bytes / (1024 * 1024)
+            throughput = mb_scanned / max(0.001, elapsed)
+
+            return SearchResult(
+                job_id=self.job_id,
+                target_path=str(target),
+                output_file=str(final_output),
+                patterns_count=len(self.config.patterns),
+                files_discovered=len(files),
+                files_searched=len(files),
+                files_with_matches=1 if total_matches > 0 else 0,
+                total_bytes_scanned=total_bytes,
+                total_matches=total_matches,
+                elapsed_seconds=round(elapsed, 3),
+                throughput_mb_s=round(throughput, 2),
+                success=True,
+                errors=[],
+                file_statistics={},
+            )
+
+        # Fallback to internal Python Aho-Corasick or Regex engine
         if self.config.is_regex:
             regex_engine = RegexEngine(
                 self.config.patterns,

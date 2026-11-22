@@ -117,9 +117,14 @@ function switchTab(tabId) {
     liveMonitorTab: "Live Monitor & Logs",
     fileManagerTab: "File Manager & Chunked Upload",
     historyTab: "Jobs & Checkpoint History",
+    serverLogsTab: "Server Diagnostic Logs (48h)",
     settingsTab: "System Settings & Telegram",
   };
   pageTitle.textContent = titles[tabId] || "Workspace";
+
+  if (tabId === "serverLogsTab") {
+    loadServerLogs();
+  }
 }
 
 // --- WebSocket Telemetry & Logging ---
@@ -227,7 +232,8 @@ function initSearchForm() {
     e.preventDefault();
 
     const target_path = document.getElementById("searchTarget").value.trim();
-    const is_regex = document.getElementById("searchEngineSelect").value === "regex";
+    const engine_type = document.getElementById("searchEngineSelect").value;
+    const is_regex = engine_type === "regex" || (engine_type === "ripgrep" && document.getElementById("rgPcre2Check").checked);
     const patterns = document.getElementById("searchPatterns").value;
     const case_sensitive = document.getElementById("optCaseSensitive").checked;
     const extract_only = document.getElementById("optExtractOnly").checked;
@@ -235,7 +241,12 @@ function initSearchForm() {
     const output_file = document.getElementById("searchOutput").value.trim();
     const compress_algo = document.getElementById("searchCompress").value;
 
-    appendTerminal(`[Search] Dispatching search request on: ${target_path}...`);
+    const rg_threads = parseInt(document.getElementById("rgThreadsSelect").value) || 0;
+    const rg_mmap = document.getElementById("rgMmapCheck").checked;
+    const rg_pcre2 = document.getElementById("rgPcre2Check").checked;
+    const rg_smart_case = document.getElementById("rgSmartCaseCheck").checked;
+
+    appendTerminal(`[Search] Dispatching search request on: ${target_path} (Engine: ${engine_type.toUpperCase()})...`);
     switchTab("liveMonitorTab");
 
     try {
@@ -248,12 +259,17 @@ function initSearchForm() {
         body: JSON.stringify({
           target_path,
           patterns,
+          engine_type,
           is_regex,
           case_sensitive,
           extract_only,
           recursive,
           output_file,
           compress_algo,
+          rg_threads,
+          rg_mmap,
+          rg_pcre2,
+          rg_smart_case,
         }),
       });
 
@@ -509,7 +525,34 @@ window.selectAsTarget = (path) => {
   switchTab("searchStudioTab");
 };
 
-// --- Settings & Telegram ---
+// --- Server Diagnostic Logs (Last 48 Hours) ---
+async function loadServerLogs() {
+  const terminal = document.getElementById("serverLogTerminal");
+  const linesCount = document.getElementById("logLinesSelect").value || 250;
+
+  try {
+    const res = await fetch(`/api/logs/recent?lines=${linesCount}`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    terminal.textContent = data.logs.join("\n");
+    terminal.scrollTop = terminal.scrollHeight;
+  } catch (e) {
+    terminal.textContent = `[Error loading server logs: ${e}]`;
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const btnRefreshLogs = document.getElementById("btnRefreshServerLogs");
+  if (btnRefreshLogs) {
+    btnRefreshLogs.addEventListener("click", loadServerLogs);
+  }
+  const linesSelect = document.getElementById("logLinesSelect");
+  if (linesSelect) {
+    linesSelect.addEventListener("change", loadServerLogs);
+  }
+});
 function initSettings() {
   document.getElementById("telegramSettingsForm").addEventListener("submit", async (e) => {
     e.preventDefault();

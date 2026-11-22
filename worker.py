@@ -41,7 +41,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pattern", "-p", metavar="PATTERN", help="Keyword or regex pattern (use newline for multiple)")
     p.add_argument("--pattern-file", metavar="FILE", help="File containing search patterns (one per line)")
     p.add_argument("--output", "-o", metavar="FILE", help="Output file path")
+    p.add_argument("--engine", choices=["ripgrep", "aho", "regex"], default="ripgrep", help="Search engine to employ")
     p.add_argument("--regex", action="store_true", help="Treat patterns as regular expressions (JIT compiled)")
+    p.add_argument("--threads", type=int, default=0, help="Number of worker threads (0 = all cores)")
     p.add_argument("--case-sensitive", action="store_true", help="Enable case-sensitive matching")
     p.add_argument("--no-recursive", action="store_true", help="Disable recursive directory traversal")
     p.add_argument("--full-context", action="store_true", help="Output match lines instead of extracted terms only")
@@ -50,7 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--compress-level", type=int, default=6, help="Compression level (1-9)")
     p.add_argument("--chunk-bytes", type=int, default=None, help="Explicit chunk size in bytes")
     p.add_argument("--job-id", metavar="ID", help="Explicit job ID (for resuming checkpoints)")
-    p.add_argument("--no-telegram", action="store_true", help="Disable Telegram alerts for this run")
+    p.add_argument("--no-telegram", action="store_true", help="Disable Telegram bot notifications for this run")
     return p
 
 
@@ -93,6 +95,7 @@ def main():
         target_path=str(target_path.resolve()),
         patterns=patterns,
         output_file=output_file,
+        engine_type=args.engine,
         is_regex=args.regex,
         case_sensitive=args.case_sensitive,
         extract_only=not args.full_context,
@@ -102,6 +105,7 @@ def main():
         compress_algo=args.compress,
         compress_level=args.compress_level,
         job_id=args.job_id,
+        rg_threads=args.threads,
     )
 
     server_cfg = get_server_config()
