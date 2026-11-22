@@ -398,7 +398,16 @@ class SearchManager:
                             if self.config.extract_only:
                                 fout.write(m.pattern_bytes.decode("utf-8", errors="replace") + "\n")
                             else:
-                                fout.write(f"[{file_path.name}:{m.absolute_start}] {m.pattern_bytes.decode('utf-8', errors='replace')}\n")
+                                # Context: Extract the surrounding line content for full readability
+                                local_start = m.absolute_start - base_abs
+                                line_start = block.rfind(b"\n", 0, local_start)
+                                line_start = 0 if line_start == -1 else line_start + 1
+                                line_end = block.find(b"\n", local_start)
+                                line_end = len(block) if line_end == -1 else line_end
+                                line_content = block[line_start:line_end].decode("utf-8", errors="replace").strip("\r")
+                                if len(line_content) > 300:
+                                    line_content = line_content[:300] + "..."
+                                fout.write(f"[{file_path.name}:offset {m.absolute_start}] {line_content}\n")
                 elif regex_engine:
                     r_matches = regex_engine.scan_block(block, start_abs_offset=base_abs)
                     for rm in r_matches:
@@ -407,7 +416,15 @@ class SearchManager:
                             if self.config.extract_only:
                                 fout.write(rm.matched_bytes.decode("utf-8", errors="replace") + "\n")
                             else:
-                                fout.write(f"[{file_path.name}:{rm.absolute_start}] {rm.matched_bytes.decode('utf-8', errors='replace')}\n")
+                                local_start = rm.absolute_start - base_abs
+                                line_start = block.rfind(b"\n", 0, local_start)
+                                line_start = 0 if line_start == -1 else line_start + 1
+                                line_end = block.find(b"\n", local_start)
+                                line_end = len(block) if line_end == -1 else line_end
+                                line_content = block[line_start:line_end].decode("utf-8", errors="replace").strip("\r")
+                                if len(line_content) > 300:
+                                    line_content = line_content[:300] + "..."
+                                fout.write(f"[{file_path.name}:offset {rm.absolute_start}] {line_content}\n")
 
                 # Boundary carry
                 carry = block[-overlap_len:] if (overlap_len and len(block) >= overlap_len) else block
