@@ -212,10 +212,18 @@ function connectWebSocket() {
   };
 }
 
+const MAX_TERM_LINES = 200;
+let termLines = [];
+
 function appendTerminal(text) {
   const term = document.getElementById("terminalConsole");
+  if (!term) return;
   const ts = new Date().toISOString().substring(11, 19);
-  term.textContent += `\n[${ts}] ${text}`;
+  termLines.push(`[${ts}] ${text}`);
+  if (termLines.length > MAX_TERM_LINES) {
+    termLines = termLines.slice(-MAX_TERM_LINES);
+  }
+  term.textContent = termLines.join("\n");
   term.scrollTop = term.scrollHeight;
 }
 
@@ -227,19 +235,35 @@ function updateHardwareMeters(data) {
   }
 }
 
-function updateJobProgress(data) {
-  activeJobId = data.job_id;
-  document.getElementById("liveSpeed").textContent = `${data.speed_mb_s.toFixed(2)} MB/s`;
-  document.getElementById("liveMatches").textContent = data.total_matches.toLocaleString();
+let progressRafPending = false;
+let pendingProgressData = null;
 
-  const eta = data.eta_seconds;
+function updateJobProgress(data) {
+  pendingProgressData = data;
+  if (!progressRafPending) {
+    progressRafPending = true;
+    requestAnimationFrame(() => {
+      progressRafPending = false;
+      if (pendingProgressData) {
+        renderJobProgress(pendingProgressData);
+      }
+    });
+  }
+}
+
+function renderJobProgress(data) {
+  activeJobId = data.job_id;
+  document.getElementById("liveSpeed").textContent = `${(data.speed_mb_s || 0).toFixed(2)} MB/s`;
+  document.getElementById("liveMatches").textContent = (data.total_matches || 0).toLocaleString();
+
+  const eta = data.eta_seconds || 0;
   const etaStr = eta > 0 ? `${Math.floor(eta / 60)}m ${eta % 60}s` : "Calculating...";
   document.getElementById("liveEta").textContent = etaStr;
 
   document.getElementById("liveJobBadge").textContent = "RUNNING";
   document.getElementById("liveJobBadge").className = "status-pill status-running";
-  document.getElementById("liveCurrentFile").textContent = `Scanning: ${data.file_current} (${data.percent}%)`;
-  document.getElementById("liveProgressBar").style.width = `${Math.max(2, data.percent)}%`;
+  document.getElementById("liveCurrentFile").textContent = `Scanning: ${data.file_current} (${(data.percent || 0).toFixed(1)}%)`;
+  document.getElementById("liveProgressBar").style.width = `${Math.max(2, Math.min(100, data.percent || 0))}%`;
 
   document.getElementById("btnPauseJob").disabled = false;
   document.getElementById("btnResumeJob").disabled = true;

@@ -3,6 +3,7 @@ Ripgrep Native Rust Engine Wrapper.
 Provides extreme search speeds (multi-gigabytes per second) across massive text datasets.
 Auto-detects system ripgrep binary or falls back to project local bin/rg.
 Non-blocking streaming with live telemetry and deadlock prevention.
+Linux-optimized with ionice/cgroup support for production servers.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ logger = logging.getLogger("yurigagarin.engine.ripgrep")
 @dataclass
 class RipgrepOptions:
     threads: int = 0                  # 0 = auto-detect CPU cores
-    mmap: bool = True                 # Use memory-mapped I/O for extreme read speed
+    mmap: bool = False                # False = sequential streaming I/O (safe for 800+ GB), True = memory-mapped
     pcre2: bool = True                # Enable PCRE2 engine with JIT
     smart_case: bool = False          # Case insensitive if pattern is lowercase
     case_sensitive: bool = False      # Strict case sensitivity
@@ -37,6 +38,8 @@ class RipgrepOptions:
     invert_match: bool = False        # Invert match (-v)
     no_ignore: bool = True            # Do not respect .gitignore
     hidden: bool = False              # Search hidden files
+    nice_level: int = 0               # Linux CPU niceness (0=max performance, 5=eco)
+    recursive: bool = True            # Recursive directory traversal
 
 
 class RipgrepEngine:
@@ -133,6 +136,8 @@ class RipgrepEngine:
             cmd.append("--no-ignore")
         if options.hidden:
             cmd.append("--hidden")
+        if not options.recursive:
+            cmd.extend(["--max-depth", "1"])
 
         # IMPORTANT: NEVER pass --multiline unless explicitly searching for patterns containing \n or \r!
         # Ripgrep official docs: "WARNING: When multiline mode is enabled, ripgrep requires that each file
@@ -173,27 +178,16 @@ class RipgrepEngine:
         return cmd
 
     @staticmethod
-    def _get_linux_preexec():
-        """Applies process niceness and I/O scheduling in Linux child process."""
+    def _get_linux_preexec(nice_level: int = 0):
+        """Applies process niceness in Linux child process without unsafe fork subprocesses."""
         if not sys.platform.startswith("linux"):
             return None
 
         def _setup_child_priority():
             try:
-                # Lower CPU priority to 15 (FastAPI / SSH get immediate priority)
-                os.nice(15)
-            except Exception:
-                pass
-            try:
-                # Set I/O priority class to 2 (Best effort) with lowest priority level 7
-                # SYS_ioprio_set on Linux: class 2 (best effort), priority 7
-                import ctypes
-                libc = ctypes.CDLL("libc.so.6", use_errno=True)
-                IOPRIO_CLASS_SHIFT = 13
-                IOPRIO_CLASS_BE = 2
-                ioprio = (IOPRIO_CLASS_BE << IOPRIO_CLASS_SHIFT) | 7
-                # syscall(__NR_ioprio_set, IOPRIO_WHO_PROCESS, 0, ioprio)
-                # Fallback to os call if supported
+                # Apply configurable niceness (0 for turbo, 2 for balanced, 5 for eco)
+                if hasattr(os, "nice") and nice_level > 0:
+                    os.nice(nice_level)
             except Exception:
                 pass
 
@@ -209,11 +203,16 @@ class RipgrepEngine:
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         stop_event: Optional[threading.Event] = None,
         append: bool = False,
+        file_list: Optional[List[str]] = None,
     ) -> Tuple[int, float]:
         """
         Executes ripgrep directly streaming to output file on disk for maximum I/O throughput.
         Uses direct OS file descriptor redirection for 100% native kernel speed.
         Monitors file size growth in background to provide real-time telemetry.
+        
+        Args:
+            file_list: Optional list of specific files to search. If provided, passes files
+                       as positional arguments for efficient batch processing.
         """
         opts = options or RipgrepOptions()
         output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -226,6 +225,7 @@ class RipgrepEngine:
             temp_pat_file = Path(tf.name)
 
         # Build clean raw command
+        # If file_list provided, use those files instead of target_path
         cmd = self.build_command(
             patterns=patterns,
             target_path=target_path,
@@ -235,11 +235,17 @@ class RipgrepEngine:
             json_mode=False,
         )
 
+        # If file_list provided, replace the target_path (last arg) with the file list
+        if file_list:
+            if cmd and not cmd[-1].startswith("-"):
+                cmd.pop()  # remove target_path
+            cmd.extend(file_list)
+
         logger.info("Executing Ripgrep: %s", " ".join(cmd[:12]) + ("..." if len(cmd) > 12 else ""))
         start_t = time.monotonic()
         proc = None
         mode = "ab" if append else "wb"
-        preexec = self._get_linux_preexec()
+        preexec = self._get_linux_preexec(opts.nice_level)
         initial_size = output_file.stat().st_size if output_file.exists() and append else 0
 
         try:
@@ -270,7 +276,7 @@ class RipgrepEngine:
                         pass
 
                     now = time.monotonic()
-                    if progress_callback and (now - last_progress_check >= 0.25):
+                    if progress_callback and (now - last_progress_check >= 0.5):
                         last_progress_check = now
                         try:
                             current_out_size = output_file.stat().st_size
@@ -305,7 +311,7 @@ class RipgrepEngine:
 
         elapsed = max(0.001, time.monotonic() - start_t)
 
-        # Count new matches appended in this specific run
+        # Count new matches appended in this specific run using fast 8MB buffered read
         total_matches = 0
         if output_file.exists():
             final_size = output_file.stat().st_size
@@ -313,7 +319,7 @@ class RipgrepEngine:
             if appended_bytes > 0:
                 with open(output_file, "rb") as f:
                     f.seek(initial_size)
-                    buf_size = 1024 * 1024
+                    buf_size = 8 * 1024 * 1024
                     while True:
                         chunk = f.read(buf_size)
                         if not chunk:

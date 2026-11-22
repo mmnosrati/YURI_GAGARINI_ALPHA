@@ -23,6 +23,11 @@ from .engine_regex import RegexEngine, RegexMatch
 from .engine_ripgrep import RipgrepEngine, RipgrepOptions
 from .resource_guard import ResourceGuard, SystemProfile
 
+try:
+    from server.config import get_server_config
+except ImportError:
+    get_server_config = None
+
 logger = logging.getLogger("yurigagarin.manager")
 
 # Optional compression modules
@@ -160,6 +165,50 @@ class SearchManager:
 
         return sorted(found)
 
+    def _batch_files(self, files: List[Path], max_batch_size_mb: int = 100, max_files: int = 50) -> List[List[Path]]:
+        """Group small files into batches for single ripgrep invocation.
+        Large files (>100MB) are processed individually.
+        """
+        batches = []
+        current_batch = []
+        current_size_mb = 0.0
+
+        for f in files:
+            f_size_mb = f.stat().st_size / (1024 * 1024)
+            if f_size_mb >= 100:
+                if current_batch:
+                    batches.append(current_batch)
+                    current_batch = []
+                    current_size_mb = 0.0
+                batches.append([f])
+            elif len(current_batch) >= max_files or current_size_mb + f_size_mb > max_batch_size_mb:
+                batches.append(current_batch)
+                current_batch = [f]
+                current_size_mb = f_size_mb
+            else:
+                current_batch.append(f)
+                current_size_mb += f_size_mb
+
+        if current_batch:
+            batches.append(current_batch)
+        return batches
+
+    def _get_hardware_profile(self) -> str:
+        """Get active hardware profile from server config."""
+        if get_server_config:
+            try:
+                cfg = get_server_config()
+                return getattr(cfg, "hardware_profile", "eco")
+            except Exception:
+                pass
+        return "eco"
+
+    def _should_use_mmap(self, file_size_mb: float, profile: str) -> bool:
+        """Determine if mmap should be used based on file size and hardware profile."""
+        thresholds = {"eco": 100, "balanced": 50, "turbo": 10}
+        threshold = thresholds.get(profile, 100)
+        return file_size_mb >= threshold
+
     def execute(self) -> SearchResult:
         """
         Executes the search process with full error handling and live progress telemetry.
@@ -191,22 +240,38 @@ class SearchManager:
         use_rg = (self.config.engine_type == "ripgrep" or self.config.engine_type == "") and rg_engine.is_available()
 
         if use_rg:
-            # Dynamically compute safe worker threads based on server resource profile
-            safe_threads = self.config.rg_threads
-            if not safe_threads:
-                safe_threads = self.system_profile.recommended_workers
+            # Map hardware profile to optimal worker threads and niceness
+            hw_profile = self._get_hardware_profile()
+            cpu_count = self.system_profile.cpu_count
+            if hw_profile == "turbo":
+                safe_threads = self.config.rg_threads or cpu_count
+                nice_level = 0
+            elif hw_profile == "balanced":
+                safe_threads = self.config.rg_threads or max(1, int(cpu_count * 0.75))
+                nice_level = 2
+            else:  # eco
+                safe_threads = self.config.rg_threads or max(1, min(2, cpu_count))
+                nice_level = 5
+
+            self.resource_guard.apply_process_priority(hw_profile)
 
             # Strict PCRE2: ONLY enable PCRE2 if is_regex is explicitly True!
             effective_pcre2 = self.config.is_regex and self.config.rg_pcre2
 
+            # Memory protection: Disable mmap for large datasets/directories to prevent Linux page-cache thrash
+            use_mmap = bool(self.config.rg_mmap and target.is_file() and total_bytes < 50 * 1024 * 1024)
+
+            engine_mode = "Ripgrep (fixed-strings)" if not self.config.is_regex else "Ripgrep (PCRE2 regex)"
             logger.info(
-                "Ripgrep active: %d threads | MMAP=%s | PCRE2=%s | Target: %s (%d files, %.2f GB)",
-                safe_threads,
-                self.config.rg_mmap,
-                effective_pcre2,
+                "Search target: %s | Files: %d | Total Size: %.2f GB | Mode: %s | Profile: %s (%d threads, nice=%d, mmap=%s)",
                 target,
                 len(files),
                 total_bytes / (1024 ** 3),
+                engine_mode,
+                hw_profile,
+                safe_threads,
+                nice_level,
+                use_mmap,
             )
 
             # Determine effective format
@@ -216,72 +281,70 @@ class SearchManager:
 
             rg_opts = RipgrepOptions(
                 threads=safe_threads,
-                mmap=self.config.rg_mmap,
+                mmap=use_mmap,
                 pcre2=effective_pcre2,
                 smart_case=self.config.rg_smart_case,
                 case_sensitive=self.config.case_sensitive,
                 output_format=fmt,
                 hidden=not self.config.skip_hidden,
                 no_ignore=True,
+                recursive=self.config.recursive,
+                nice_level=nice_level,
             )
 
-            # File-by-File high throughput execution pipeline
-            processed_bytes = 0
-            total_matches = 0
-            open(output_path, "wb").close()  # truncate or create output file
+            # Direct Native Ripgrep execution: Single high-throughput stream without Python process-spawning bottlenecks
+            last_progress_emit = [0.0]
 
-            for idx, f_path in enumerate(files):
-                if self._stop_requested.is_set():
-                    logger.info("Search job %s stopped by user at file %d/%d.", self.job_id, idx, len(files))
-                    break
+            def _handle_rg_stream_progress(prog_info: Dict[str, Any]):
+                now_t = time.monotonic()
+                if now_t - last_progress_emit[0] < 0.8:
+                    return
+                last_progress_emit[0] = now_t
 
-                # Handle pause
-                while self._pause_requested.is_set() and not self._stop_requested.is_set():
-                    time.sleep(0.5)
+                elapsed_s = max(0.001, prog_info.get("elapsed", now_t - started_at))
+                out_b = prog_info.get("out_bytes", 0)
+                cur_spd = (out_b / (1024 * 1024)) / elapsed_s if out_b > 0 else 0.0
 
-                f_size = f_path.stat().st_size
-                now = time.monotonic()
-                elapsed = max(0.001, now - started_at)
-                current_spd = (processed_bytes / (1024 * 1024)) / elapsed if processed_bytes > 0 else 0.0
-                pct = min(99.0, (processed_bytes / max(1, total_bytes)) * 100.0)
-                rem_bytes = max(0, total_bytes - processed_bytes)
-                eta_sec = int(rem_bytes / (max(1.0, current_spd) * 1024 * 1024)) if current_spd > 0 else 0
-
-                # Send live telemetry BEFORE scanning each file
                 if self.progress_callback:
                     self.progress_callback({
                         "job_id": self.job_id,
-                        "file_current": f_path.name,
-                        "file_index": idx + 1,
+                        "file_current": target.name,
+                        "file_index": 1,
                         "total_files": len(files),
-                        "percent": round(pct, 1),
-                        "speed_mb_s": round(current_spd, 2),
-                        "eta_seconds": eta_sec,
-                        "total_matches": total_matches,
-                        "bytes_processed": processed_bytes,
+                        "percent": 50.0,
+                        "speed_mb_s": round(cur_spd, 2),
+                        "eta_seconds": 0,
+                        "total_matches": 0,
+                        "bytes_processed": out_b,
                         "total_bytes": total_bytes,
                     })
 
-                # Execute ripgrep on this specific file, appending results directly to output_path
-                f_matches, _ = rg_engine.execute_stream(
-                    patterns=self.config.patterns,
-                    target_path=str(f_path),
-                    output_file=output_path,
-                    options=rg_opts,
-                    is_regex=self.config.is_regex,
-                    stop_event=self._stop_requested,
-                    append=True,
-                )
+            # Send initial starting telemetry
+            if self.progress_callback:
+                self.progress_callback({
+                    "job_id": self.job_id,
+                    "file_current": target.name,
+                    "file_index": 1,
+                    "total_files": len(files),
+                    "percent": 1.0,
+                    "speed_mb_s": 0.0,
+                    "eta_seconds": 0,
+                    "total_matches": 0,
+                    "bytes_processed": 0,
+                    "total_bytes": total_bytes,
+                })
 
-                # Instantly release Linux Page Cache for this scanned file (Zero RAM accumulation)
-                try:
-                    with open(f_path, "rb") as fh:
-                        self.resource_guard.release_page_cache(fh.fileno(), 0, f_size)
-                except OSError:
-                    pass
-
-                processed_bytes += f_size
-                total_matches += f_matches
+            # Execute Ripgrep directly on the target (single file or full directory)
+            total_matches, elapsed_stream = rg_engine.execute_stream(
+                patterns=self.config.patterns,
+                target_path=str(target),
+                output_file=output_path,
+                options=rg_opts,
+                is_regex=self.config.is_regex,
+                progress_callback=_handle_rg_stream_progress,
+                stop_event=self._stop_requested,
+                append=False,
+            )
 
             # Post-process output (compression if enabled)
             final_output = output_path
@@ -289,7 +352,7 @@ class SearchManager:
                 final_output = self._compress_file(output_path, self.config.compress_algo, self.config.compress_level)
 
             elapsed_total = max(0.001, time.monotonic() - started_at)
-            mb_scanned = processed_bytes / (1024 * 1024)
+            mb_scanned = total_bytes / (1024 * 1024)
             final_throughput = mb_scanned / elapsed_total
 
             # Final 100% progress notification
@@ -303,7 +366,7 @@ class SearchManager:
                     "speed_mb_s": round(final_throughput, 2),
                     "eta_seconds": 0,
                     "total_matches": total_matches,
-                    "bytes_processed": processed_bytes,
+                    "bytes_processed": total_bytes,
                     "total_bytes": total_bytes,
                 })
 
@@ -315,7 +378,7 @@ class SearchManager:
                 files_discovered=len(files),
                 files_searched=len(files),
                 files_with_matches=1 if total_matches > 0 else 0,
-                total_bytes_scanned=processed_bytes,
+                total_bytes_scanned=total_bytes,
                 total_matches=total_matches,
                 elapsed_seconds=round(elapsed_total, 3),
                 throughput_mb_s=round(final_throughput, 2),

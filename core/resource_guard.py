@@ -40,10 +40,10 @@ class ResourceGuard:
     MIN_CHUNK_BYTES = 1 * 1024 * 1024       # 1 MB minimum
     DEFAULT_CHUNK_BYTES = 8 * 1024 * 1024   # 8 MB default
     MAX_CHUNK_BYTES = 64 * 1024 * 1024      # 64 MB maximum
-    RAM_THROTTLE_THRESHOLD = 85.0           # 85% RAM alert/throttle threshold
+    RAM_THROTTLE_THRESHOLD = 80.0           # 80% RAM alert/throttle threshold
     CPU_MAX_TARGET_LOAD = 0.90              # 90% CPU load target
 
-    def __init__(self, target_ram_threshold: float = RAM_THROTTLE_THRESHOLD):
+    def __init__(self, target_ram_threshold: float = 80.0):
         self.target_ram_threshold = target_ram_threshold
         self._posix_fadvise_available = hasattr(os, "posix_fadvise") and hasattr(os, "POSIX_FADV_DONTNEED")
         self._psutil = self._try_import_psutil()
@@ -161,20 +161,14 @@ class ResourceGuard:
             except OSError:
                 pass
 
-    def apply_process_priority(self) -> None:
-        """Lowers priority on Linux/Unix so SSH terminals and critical services remain responsive."""
+    def apply_process_priority(self, profile: str = "balanced") -> None:
+        """Sets safe CPU priority based on hardware profile without starving I/O throughput."""
         if hasattr(os, "nice"):
             try:
-                os.nice(15)  # Background priority on Linux
+                # Safe nice levels: 0 for turbo, 2 for balanced, 5 for eco
+                target_nice = 0 if profile == "turbo" else (2 if profile == "balanced" else 5)
+                os.nice(target_nice)
             except OSError:
-                pass
-
-        # Apply idle/best-effort I/O priority on Linux using ionice (class 3 = idle)
-        if sys.platform.startswith("linux"):
-            try:
-                import subprocess
-                subprocess.run(["ionice", "-c", "3", "-p", str(os.getpid())], capture_output=True, timeout=2)
-            except Exception:
                 pass
 
     def should_throttle(self) -> bool:

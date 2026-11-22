@@ -70,6 +70,7 @@ class JobQueueManager:
         self._jobs: Dict[str, JobInfo] = {}
         self._active_managers: Dict[str, SearchManager] = {}
         self._threads: Dict[str, threading.Thread] = {}
+        self._last_broadcast: Dict[str, float] = {}
         self._lock = threading.Lock()
 
         # Load persisted checkpoints into job history
@@ -249,7 +250,7 @@ class JobQueueManager:
         return False
 
     def _handle_progress(self, progress_data: Dict[str, Any]) -> None:
-        """Receives progress events and updates job info & WebSocket broadcast."""
+        """Receives progress events and updates job info & rate-limited WebSocket broadcast."""
         job_id = progress_data.get("job_id")
         if not job_id:
             return
@@ -267,8 +268,14 @@ class JobQueueManager:
                 job.file_index = progress_data.get("file_index", 0)
                 job.total_files = progress_data.get("total_files", 0)
 
-        if self.broadcast_callback:
-            self.broadcast_callback({
-                "event": "progress",
-                "data": progress_data,
-            })
+        # Rate-limit broadcast to max 1 per 0.8s (except final 100% or initial start)
+        pct = progress_data.get("percent", 0.0)
+        now = time.monotonic()
+        last_t = self._last_broadcast.get(job_id, 0.0)
+        if (now - last_t >= 0.8) or pct >= 100.0 or pct <= 1.0:
+            self._last_broadcast[job_id] = now
+            if self.broadcast_callback:
+                self.broadcast_callback({
+                    "event": "progress",
+                    "data": progress_data,
+                })

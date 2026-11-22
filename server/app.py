@@ -60,23 +60,27 @@ auth_mgr = AuthManager(server_cfg)
 file_mgr = FileManager(upload_dir=server_cfg.default_upload_dir)
 resource_guard = ResourceGuard(target_ram_threshold=server_cfg.max_ram_throttle_percent)
 
-# Active WebSocket connections
+# Active WebSocket connections with connection limiting
+MAX_WS_CONNECTIONS = 10
 _active_ws: List[WebSocket] = []
 _loop: Optional[asyncio.AbstractEventLoop] = None
 
 
 def broadcast_event(event_data: Dict[str, Any]) -> None:
-    """Thread-safe WebSocket broadcaster."""
+    """Thread-safe WebSocket broadcaster with backpressure handling."""
     global _loop
     if not _active_ws or _loop is None:
         return
 
     msg = json.dumps(event_data)
+    # Iterate over copy and remove dead connections
     for ws in list(_active_ws):
         try:
             asyncio.run_coroutine_threadsafe(ws.send_text(msg), _loop)
         except Exception:
-            pass
+            # Remove dead connections silently
+            if ws in _active_ws:
+                _active_ws.remove(ws)
 
 
 job_queue = JobQueueManager(config=server_cfg, broadcast_callback=broadcast_event)
@@ -368,6 +372,11 @@ async def test_telegram(authorized: bool = Depends(require_admin)):
 # --- WebSocket Telemetry & Real-Time Terminal ---
 @app.websocket("/ws/telemetry")
 async def websocket_telemetry(websocket: WebSocket):
+    # Connection limiting: reject if at capacity
+    if len(_active_ws) >= MAX_WS_CONNECTIONS:
+        await websocket.close(code=1013, reason="Server busy: max WebSocket connections reached")
+        return
+    
     await websocket.accept()
     _active_ws.append(websocket)
     try:

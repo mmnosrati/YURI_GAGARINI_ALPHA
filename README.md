@@ -3,12 +3,13 @@
   <br />
   <h2>Enterprise High-Performance Big-Data Search Platform & Admin Web UI</h2>
   <p>
-    <b>Engineered to scan multi-hundred-gigabyte datasets (800+ GB across thousands of files) with zero server lockups, Linux Page Cache purging, hardware self-tuning, and ultra-high-throughput Rust SIMD acceleration.</b>
+    <b>Engineered to scan multi-hundred-gigabyte datasets (800+ GB across thousands of files) with zero server lockups, Linux Page Cache purging, hardware self-tuning, and ultra-high-throughput Rust SIMD acceleration (700+ MB/s).</b>
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/version-17.0%20Enterprise-38BDF8?style=flat-square" alt="Version" />
+    <img src="https://img.shields.io/badge/version-17.1%20Enterprise-38BDF8?style=flat-square" alt="Version" />
     <img src="https://img.shields.io/badge/core-Ripgrep%20(Rust%20SIMD)%20%2B%20Aho--Corasick-10B981?style=flat-square" alt="Core Engines" />
+    <img src="https://img.shields.io/badge/throughput-740%2B%20MB%2Fs-FF4500?style=flat-square" alt="Throughput" />
     <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-6366F1?style=flat-square" alt="Platform" />
     <img src="https://img.shields.io/badge/license-MIT-F59E0B?style=flat-square" alt="License" />
   </p>
@@ -97,10 +98,12 @@ Yuri Gagarin Alpha solves these problems through an isolated, file-by-file pipel
 
 ### 1. Native Ripgrep (Rust SIMD) - Primary Engine
 - Utilizes Intel AVX2/SSE2 vectorized byte matching (`memchr` and `Teddy` algorithms).
-- Delivers raw disk read speeds exceeding **500 to 1,000+ MB/s**.
+- Delivers raw disk read speeds exceeding **500 to 740+ MB/s** on NVMe / fast storage.
+- **Native Directory Traversal**: Zero-Python directory discovery overhead; ripgrep recursively navigates directory hierarchies using lock-free parallel Rust threads.
 - **Pure Fixed-Strings SIMD Fast-Path**: Literal keywords bypass PCRE2 completely, preventing regex interpreter overhead.
 - **Binary Tolerance (`--text` / `-a`)**: Files with NUL bytes (`\x00`), corrupted encoding, emojis, or foreign Unicode characters are scanned to the exact last byte without premature abortion.
-- **Anti-OOM Design**: Multiline mode is strictly disabled on single-line searches, ensuring memory consumption stays strictly under 50 MB regardless of file size.
+- **Anti-OOM & RAM Protection (<= 80%)**: Employs sequential streaming (`--no-mmap`) for large dumps (>50 MB) and directories, completely preventing Linux Page Cache thrashing and virtual memory exhaustion.
+- **Anti-Freeze Web Telemetry**: Rate-limited WebSocket broadcaster (max 1 msg/s) and DOM terminal auto-pruning (max 200 lines) guarantee a silky-smooth Web UI under heavy search loads.
 
 ### 2. Output Formatting Modes
 Configure how extracted matches appear in the output file:
@@ -125,11 +128,11 @@ Configure how extracted matches appear in the output file:
 
 Yuri Gagarin Alpha dynamically scales between constrained cloud VPS instances and high-end dedicated enterprise servers:
 
-| Profile | Target Environment | Concurrency | CPU Priority | I/O Priority | Kernel Cache |
+| Profile | Target Environment | Concurrency | CPU Priority | I/O Priority | Kernel Cache & RAM |
 | :--- | :--- | :---: | :---: | :---: | :---: |
-| **Eco VPS Safe** | 1-2 vCPU, <= 2GB RAM | 1 - 2 Threads | `nice 15` | `ionice -c 2 -n 7` | Immediate Purge |
-| **Balanced** | 4-8 Cores, 8-16GB RAM | 75% of Cores | `nice 10` | Best-Effort | Batch Purge |
-| **Extreme Turbo** | 16-64 Cores, 32GB+ RAM | 100% of Cores | Normal | High Priority | OS Managed |
+| **Eco VPS Safe** | 1-2 vCPU, <= 2GB RAM | 50% Cores (1-2) | `nice 5` | Best-Effort | Sequential (RAM <= 80%) |
+| **Balanced** | 4-8 Cores, 8-16GB RAM | 75% of Cores | `nice 2` | Best-Effort | Sequential Stream |
+| **Extreme Turbo** | 16-64 Cores, 32GB+ RAM | 100% of Cores | `nice 0` (Max) | High Throughput | OS Streaming Buffer |
 
 You can switch profiles with one click in the **Settings & Telegram** tab of the Web UI or via the REST API.
 
