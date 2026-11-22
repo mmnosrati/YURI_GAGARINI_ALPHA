@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YURI GAGARIN ALPHA - Enterprise Big-Data Search Platform</title>
+  <link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+  <!-- Single-Admin Login Overlay -->
+  <div id="authOverlay" class="auth-overlay">
+    <div class="auth-card">
+      <img src="/assets/logo.svg" alt="YURI GAGARIN ALPHA">
+      <h2 style="margin-bottom: 8px; font-weight: 700;">Admin Authentication</h2>
+      <p style="color: var(--text-muted); font-size: 13.5px; margin-bottom: 24px;">
+        Please enter the master password to access the search cluster.
+      </p>
+      <form id="loginForm">
+        <div class="form-group">
+          <input type="password" id="adminPassword" class="input-text" placeholder="Master Password" required autofocus>
+        </div>
+        <button type="submit" class="btn btn-cyan" style="width: 100%;">Sign In</button>
+        <p id="loginError" style="color: var(--accent-rose); font-size: 13px; margin-top: 12px; display: none;"></p>
+      </form>
+    </div>
+  </div>
+
+  <!-- Sidebar Navigation -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <img src="/assets/logo.svg" alt="YURI GAGARIN ALPHA">
+    </div>
+    <ul class="nav-links">
+      <li class="nav-item active" data-tab="dashboardTab">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"></path></svg>
+        Dashboard
+      </li>
+      <li class="nav-item" data-tab="searchStudioTab">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+        Search Studio
+      </li>
+      <li class="nav-item" data-tab="liveMonitorTab">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+        Live Monitor & Logs
+      </li>
+      <li class="nav-item" data-tab="fileManagerTab">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+        Files & Upload
+      </li>
+      <li class="nav-item" data-tab="historyTab">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+        Jobs & History
+      </li>
+      <li class="nav-item" data-tab="settingsTab">
+        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+        Settings & Telegram
+      </li>
+    </ul>
+    <div class="sidebar-footer">
+      <span>v17.0 Enterprise</span>
+      <button id="logoutBtn" class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;">Sign Out</button>
+    </div>
+  </aside>
+
+  <!-- Main Content Space -->
+  <main class="main-content">
+    <header class="top-bar">
+      <div class="top-bar-title" id="pageTitle">Cluster Dashboard</div>
+      <div class="system-meters">
+        <div class="meter-badge">
+          <span>CPU:</span>
+          <span id="meterCpu" class="meter-val">0.0%</span>
+        </div>
+        <div class="meter-badge">
+          <span>RAM:</span>
+          <span id="meterRam" class="meter-val">0.0%</span>
+        </div>
+        <div class="meter-badge">
+          <span>Disk Free:</span>
+          <span id="meterDisk" class="meter-val">-- GB</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="view-container">
+
+      <!-- TAB 1: DASHBOARD -->
+      <section id="dashboardTab" class="tab-pane active">
+        <div class="grid-3">
+          <div class="card metric-box">
+            <div class="metric-label">Active Engine</div>
+            <div class="metric-number" style="color: var(--accent-cyan);">Aho + JIT Regex</div>
+          </div>
+          <div class="card metric-box">
+            <div class="metric-label">Kernel Optimizer</div>
+            <div class="metric-number" id="dashKernelOpt" style="color: var(--accent-emerald);">posix_fadvise</div>
+          </div>
+          <div class="card metric-box">
+            <div class="metric-label">Optimal Chunk Size</div>
+            <div class="metric-number" id="dashChunkSize" style="color: var(--accent-amber);">8 MB</div>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">Hardware Profile & Resource Bounds</div>
+            <table class="data-table">
+              <tr><td>Host OS Platform</td><td id="sysPlatform" class="meter-val">--</td></tr>
+              <tr><td>Total CPU Cores</td><td id="sysCpuCount" class="meter-val">--</td></tr>
+              <tr><td>Total RAM Installed</td><td id="sysTotalRam" class="meter-val">-- GB</td></tr>
+              <tr><td>Available Free RAM</td><td id="sysAvailRam" class="meter-val">-- GB</td></tr>
+              <tr><td>Recommended Workers</td><td id="sysWorkers" class="meter-val">--</td></tr>
+            </table>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Quick Search Launch</div>
+            <p style="color: var(--text-muted); font-size: 13.5px; margin-bottom: 16px;">
+              Launch rapid multi-file scans directly using the high-performance Aho-Corasick automaton.
+            </p>
+            <button class="btn btn-cyan" onclick="switchTab('searchStudioTab')">Open Search Studio</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: SEARCH STUDIO -->
+      <section id="searchStudioTab" class="tab-pane">
+        <div class="card">
+          <div class="card-title">Search Configuration & Execution</div>
+          <form id="searchForm">
+            <div class="grid-2">
+              <div class="form-group">
+                <label class="form-label">Target Directory or File Path:</label>
+                <input type="text" id="searchTarget" class="input-text" placeholder="e.g. /var/log or C:\Data" required>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Search Engine:</label>
+                <select id="searchEngineSelect" class="select-input">
+                  <option value="aho">Aho-Corasick (Vectorized Multi-Literal - Maximum Speed)</option>
+                  <option value="regex">PCRE2 / JIT Regex (Advanced Pattern Matching)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Search Patterns (One pattern per line):</label>
+              <textarea id="searchPatterns" class="input-textarea" rows="6" placeholder="Enter keywords or regex patterns..." required></textarea>
+            </div>
+
+            <div class="grid-3">
+              <label class="checkbox-group">
+                <input type="checkbox" id="optCaseSensitive"> Case Sensitive
+              </label>
+              <label class="checkbox-group">
+                <input type="checkbox" id="optExtractOnly" checked> Extract Only (Match words only)
+              </label>
+              <label class="checkbox-group">
+                <input type="checkbox" id="optRecursive" checked> Scan Subfolders Recursively
+              </label>
+            </div>
+
+            <div class="grid-2" style="margin-top: 16px;">
+              <div class="form-group">
+                <label class="form-label">Output File Path (Optional):</label>
+                <input type="text" id="searchOutput" class="input-text" placeholder="Default auto-generated timestamp file in output/">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Output Compression:</label>
+                <select id="searchCompress" class="select-input">
+                  <option value="none">None (Plain Text .txt)</option>
+                  <option value="gzip">Gzip (.gz)</option>
+                  <option value="zstd">Zstandard (.zst)</option>
+                  <option value="lz4">LZ4 (.lz4)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 12px; margin-top: 20px;">
+              <button type="submit" class="btn btn-cyan">Start Search Mission</button>
+              <button type="reset" class="btn btn-secondary">Clear Inputs</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- TAB 3: LIVE MONITOR & LOGS -->
+      <section id="liveMonitorTab" class="tab-pane">
+        <div class="grid-3">
+          <div class="card metric-box">
+            <div class="metric-label">Scan Throughput</div>
+            <div class="metric-number" id="liveSpeed" style="color: var(--accent-cyan);">0.00 MB/s</div>
+          </div>
+          <div class="card metric-box">
+            <div class="metric-label">Total Matches Found</div>
+            <div class="metric-number" id="liveMatches" style="color: var(--accent-emerald);">0</div>
+          </div>
+          <div class="card metric-box">
+            <div class="metric-label">Estimated Time Remaining</div>
+            <div class="metric-number" id="liveEta" style="color: var(--accent-amber);">--:--</div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom: 24px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <div>
+              <span id="liveJobBadge" class="status-pill status-running">IDLE</span>
+              <span id="liveCurrentFile" style="margin-left: 12px; font-family: var(--font-mono); font-size: 13.5px; color: var(--text-muted);">No active search running</span>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button id="btnPauseJob" class="btn btn-secondary" style="padding: 6px 14px; font-size: 13px;" disabled>Pause</button>
+              <button id="btnResumeJob" class="btn btn-secondary" style="padding: 6px 14px; font-size: 13px;" disabled>Resume</button>
+              <button id="btnStopJob" class="btn btn-danger" style="padding: 6px 14px; font-size: 13px;" disabled>Stop</button>
+            </div>
+          </div>
+          <div style="background: var(--bg-primary); border-radius: 8px; height: 12px; overflow: hidden;">
+            <div id="liveProgressBar" style="height: 100%; width: 0%; background: linear-gradient(90deg, #38BDF8, #2563EB); transition: width 0.3s;"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Live Terminal & Telemetry Stream</div>
+          <div id="terminalConsole" class="terminal-window">[System Initialized] Awaiting search job commands...</div>
+        </div>
+      </section>
+
+      <!-- TAB 4: FILE MANAGER & CHUNKED UPLOAD -->
+      <section id="fileManagerTab" class="tab-pane">
+        <div class="card" style="margin-bottom: 24px;">
+          <div class="card-title">Resumable Chunked File Upload</div>
+          <p style="color: var(--text-muted); font-size: 13.5px; margin-bottom: 16px;">
+            Upload massive text files (multi-gigabyte) directly to the server. Files are sent in small chunk streams with SHA-256 verification without exhausting server memory.
+          </p>
+          <div id="uploadDropzone" class="dropzone">
+            <input type="file" id="fileUploadInput" style="display: none;">
+            <svg style="width: 48px; height: 48px; color: var(--accent-cyan); margin-bottom: 12px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+            <div style="font-weight: 600; font-size: 15px;">Click to select file or drag & drop here</div>
+            <div style="font-size: 12.5px; color: var(--text-dim); margin-top: 4px;">Supports any file size (resumable streams)</div>
+          </div>
+
+          <div id="uploadProgressContainer" style="display: none; margin-top: 20px;">
+            <div style="display: flex; justify-content: space-between; font-size: 13.5px; margin-bottom: 6px;">
+              <span id="uploadFileName">--</span>
+              <span id="uploadPercent" class="meter-val">0%</span>
+            </div>
+            <div style="background: var(--bg-primary); border-radius: 6px; height: 10px; overflow: hidden;">
+              <div id="uploadProgressBar" style="height: 100%; width: 0%; background: var(--accent-emerald); transition: width 0.2s;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <div class="card-title" style="margin-bottom: 0;">Server Filesystem Explorer</div>
+            <div style="font-family: var(--font-mono); font-size: 13px; color: var(--text-muted);" id="fsCurrentPath">/</div>
+          </div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Size</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="fsTableBody">
+              <tr><td colspan="4" style="text-align: center; color: var(--text-dim);">Loading directories...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- TAB 5: JOBS & HISTORY -->
+      <section id="historyTab" class="tab-pane">
+        <div class="card">
+          <div class="card-title">Search Execution History & Checkpoints</div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Job ID</th>
+                <th>Target Path</th>
+                <th>Status</th>
+                <th>Matches</th>
+                <th>Progress</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="historyTableBody">
+              <tr><td colspan="6" style="text-align: center; color: var(--text-dim);">No job records found.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- TAB 6: SETTINGS & TELEGRAM -->
+      <section id="settingsTab" class="tab-pane">
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">Telegram Bot Integration</div>
+            <form id="telegramSettingsForm">
+              <label class="checkbox-group" style="margin-bottom: 16px;">
+                <input type="checkbox" id="setTgEnabled"> Enable Telegram Notifications & Delivery
+              </label>
+              <div class="form-group">
+                <label class="form-label">Telegram Bot Token:</label>
+                <input type="password" id="setTgToken" class="input-text" placeholder="e.g. 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Telegram Chat ID:</label>
+                <input type="text" id="setTgChatId" class="input-text" placeholder="e.g. 987654321">
+              </div>
+              <div style="display: flex; gap: 12px; margin-top: 20px;">
+                <button type="submit" class="btn btn-cyan">Save Telegram Settings</button>
+                <button type="button" id="btnTestTg" class="btn btn-secondary">Test Connection</button>
+              </div>
+            </form>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Security & Master Password</div>
+            <form id="passwordSettingsForm">
+              <div class="form-group">
+                <label class="form-label">New Master Admin Password:</label>
+                <input type="password" id="setNewPassword" class="input-text" placeholder="Enter strong new password" required>
+              </div>
+              <button type="submit" class="btn btn-primary" style="margin-top: 10px;">Update Password</button>
+            </form>
+
+            <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 24px 0;">
+
+            <div class="card-title">Server Safety Limits</div>
+            <div class="form-group">
+              <label class="form-label">RAM Throttle Cap (%):</label>
+              <input type="number" id="setRamCap" class="input-text" value="85" min="50" max="95">
+            </div>
+            <button type="button" id="btnSaveLimits" class="btn btn-secondary">Save Resource Limits</button>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
