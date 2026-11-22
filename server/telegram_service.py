@@ -131,18 +131,29 @@ class TelegramService:
     def send_output_file_multipart(self, output_file: Path, summary_stats: Dict[str, Any]) -> bool:
         """
         Splits output files larger than 45 MB into consecutive parts and uploads them.
+        Includes complete mission statistics, timestamp, target, and matches in the caption.
         """
         if not self.enabled or not output_file.exists():
             return False
 
         size_bytes = output_file.stat().st_size
+        elapsed = summary_stats.get("elapsed_seconds", 0.0)
+        speed = summary_stats.get("throughput_mb_s", 0.0)
+        matches = summary_stats.get("total_matches", 0)
+        target = summary_stats.get("target_path", "Unknown")
+        job_id = summary_stats.get("job_id", "N/A")
+        now_str = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+
         caption = (
-            f"🔍 *YURI GAGARIN ALPHA - SEARCH COMPLETED*\n\n"
-            f"• *Matches*: `{summary_stats.get('total_matches', 0):,}`\n"
-            f"• *Files Scanned*: `{summary_stats.get('files_searched', 0):,}`\n"
-            f"• *Speed*: `{summary_stats.get('throughput_mb_s', 0):.2f} MB/s`\n"
-            f"• *Elapsed*: `{summary_stats.get('elapsed_seconds', 0):.2f}s`\n"
-            f"• *Size*: `{size_bytes / (1024 * 1024):.2f} MB`\n"
+            f"🔍 *YURI GAGARIN ALPHA - SEARCH MISSION REPORT*\n\n"
+            f"• *Job ID*: `{job_id}`\n"
+            f"• *Target*: `{target}`\n"
+            f"• *Total Matches*: `{matches:,}`\n"
+            f"• *Execution Time*: `{elapsed:.2f}s`\n"
+            f"• *Average Throughput*: `{speed:.2f} MB/s`\n"
+            f"• *Output File*: `{output_file.name}`\n"
+            f"• *File Size*: `{size_bytes / (1024 * 1024):.2f} MB`\n"
+            f"• *Completed At*: `{now_str}`\n"
         )
 
         if size_bytes <= self.MAX_FILE_SIZE_BYTES:
@@ -152,7 +163,8 @@ class TelegramService:
         parts_count = math.ceil(size_bytes / self.MAX_FILE_SIZE_BYTES)
         self.send_message(
             f"📦 Output `{output_file.name}` ({size_bytes / (1024 * 1024):.1f} MB) "
-            f"exceeds Telegram limit. Uploading in {parts_count} parts..."
+            f"exceeds Telegram limit. Uploading in {parts_count} parts...\n"
+            f"• Matches: `{matches:,}`\n• Target: `{target}`"
         )
 
         temp_dir = Path(tempfile.mkdtemp(prefix="yuri_tg_parts_"))

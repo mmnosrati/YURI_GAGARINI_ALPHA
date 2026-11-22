@@ -44,7 +44,7 @@ function initAuth() {
   const logoutBtn = document.getElementById("logoutBtn");
 
   if (authToken) {
-    // Validate token with backend
+    // Validate token with backend using apiFetch to avoid premature logouts
     fetch("/api/auth/verify", {
       headers: { Authorization: `Bearer ${authToken}` },
     })
@@ -52,13 +52,19 @@ function initAuth() {
         if (res.ok) {
           overlay.style.display = "none";
           onAuthenticated();
-        } else {
+        } else if (res.status === 401) {
+          // Only show overlay if explicit 401 from server
           localStorage.removeItem("yuri_auth_token");
           authToken = "";
           overlay.style.display = "flex";
+        } else {
+          // If network glitch or 500, do NOT kick user out!
+          overlay.style.display = "none";
+          onAuthenticated();
         }
       })
       .catch(() => {
+        // Network timeout / connection pending: stay authenticated
         overlay.style.display = "none";
         onAuthenticated();
       });
@@ -106,6 +112,32 @@ function onAuthenticated() {
   loadDirectory();
   loadJobHistory();
   loadSettings();
+
+  // Restore active job monitor state if any job is currently RUNNING
+  restoreActiveJobMonitor();
+}
+
+async function restoreActiveJobMonitor() {
+  try {
+    const res = await apiFetch("/api/jobs/list");
+    if (!res.ok) return;
+    const data = await res.json();
+    const runningJob = (data.jobs || []).find((j) => j.status === "RUNNING");
+    if (runningJob) {
+      activeJobId = runningJob.job_id;
+      document.getElementById("liveJobBadge").textContent = "RUNNING";
+      document.getElementById("liveJobBadge").className = "status-pill status-running";
+      document.getElementById("liveCurrentFile").textContent = `Scanning: ${runningJob.current_file || runningJob.target_path}`;
+      document.getElementById("liveSpeed").textContent = `${(runningJob.speed_mb_s || 0).toFixed(2)} MB/s`;
+      document.getElementById("liveMatches").textContent = (runningJob.total_matches || 0).toLocaleString();
+      document.getElementById("liveProgressBar").style.width = `${Math.max(2, runningJob.progress_percent || 0)}%`;
+      document.getElementById("btnPauseJob").disabled = false;
+      document.getElementById("btnResumeJob").disabled = true;
+      document.getElementById("btnStopJob").disabled = false;
+    }
+  } catch (e) {
+    console.error("Error restoring active job:", e);
+  }
 }
 
 // --- Navigation Tabs ---
@@ -265,6 +297,18 @@ function initSearchForm() {
     const rg_smart_case = document.getElementById("rgSmartCaseCheck").checked;
 
     appendTerminal(`[Search] Launching scan on: ${target_path} (Engine: ${engine_type.toUpperCase()}, Format: ${output_format})...`);
+    
+    // Reset Live Monitor UI for new job
+    document.getElementById("liveJobBadge").textContent = "STARTING";
+    document.getElementById("liveJobBadge").className = "status-pill status-running";
+    document.getElementById("liveCurrentFile").textContent = `Preparing target: ${target_path}`;
+    document.getElementById("liveSpeed").textContent = "Calculating...";
+    document.getElementById("liveMatches").textContent = "0";
+    document.getElementById("liveProgressBar").style.width = "2%";
+    document.getElementById("btnPauseJob").disabled = false;
+    document.getElementById("btnResumeJob").disabled = true;
+    document.getElementById("btnStopJob").disabled = false;
+
     switchTab("liveMonitorTab");
 
     try {

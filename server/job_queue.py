@@ -144,11 +144,12 @@ class JobQueueManager:
         # Telegram announcement
         if self.telegram.enabled:
             self.telegram.send_message(
-                f"🚀 *YURI GAGARIN ALPHA - JOB STARTED*\n\n"
+                f"🚀 *YURI GAGARIN ALPHA - SEARCH JOB STARTED*\n\n"
                 f"• *Job ID*: `{job_id}`\n"
                 f"• *Target*: `{search_cfg.target_path}`\n"
                 f"• *Patterns*: `{len(search_cfg.patterns)}`\n"
-                f"• *Engine*: `{'Regex' if search_cfg.is_regex else 'Aho-Corasick'}`\n"
+                f"• *Format*: `{search_cfg.output_format}`\n"
+                f"• *Engine*: `{'Ripgrep' if search_cfg.engine_type == 'ripgrep' else ('Regex' if search_cfg.is_regex else 'Aho-Corasick')}`\n"
             )
 
         return job_info

@@ -124,6 +124,10 @@ class RipgrepEngine:
         else:
             cmd.append("--ignore-case")
 
+        # Binary / Text mode: ALWAYS search as text (--text / -a) so corrupted bytes, NUL bytes, or encoding anomalies NEVER abort scanning
+        cmd.append("--text")
+        cmd.append("--no-messages")
+
         # Hidden & Git Ignore
         if options.no_ignore:
             cmd.append("--no-ignore")
@@ -189,15 +193,14 @@ class RipgrepEngine:
             tf.close()
             temp_pat_file = Path(tf.name)
 
-        use_json = is_regex
-
+        # We execute ripgrep in direct raw output mode (NO JSON) for pure native throughput and clean formatting!
         cmd = self.build_command(
             patterns=patterns,
             target_path=target_path,
             options=opts,
             is_regex=is_regex,
             patterns_file=temp_pat_file,
-            json_mode=use_json,
+            json_mode=False,
         )
 
         logger.info("Executing Ripgrep: %s", " ".join(cmd[:12]) + ("..." if len(cmd) > 12 else ""))
@@ -206,12 +209,12 @@ class RipgrepEngine:
         last_telemetry_emit = 0.0
 
         try:
-            with open(output_file, "a", encoding="utf-8", errors="replace", buffering=2 * 1024 * 1024) as out_f:
+            with open(output_file, "ab", buffering=4 * 1024 * 1024) as out_f:
                 proc = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    bufsize=2 * 1024 * 1024,
+                    bufsize=4 * 1024 * 1024,
                 )
 
                 # Drain stderr in separate thread to prevent pipe deadlocks
@@ -226,46 +229,17 @@ class RipgrepEngine:
                 err_thread.start()
 
                 if proc.stdout:
-                    if use_json:
-                        for raw_line in proc.stdout:
-                            if stop_event and stop_event.is_set():
-                                proc.terminate()
-                                break
-                            try:
-                                item = json.loads(raw_line)
-                                msg_type = item.get("type")
-                                if msg_type == "match":
-                                    data = item.get("data", {})
-                                    submatches = data.get("submatches", [])
-                                    total_matches += len(submatches)
-                                    if opts.extract_only:
-                                        for sm in submatches:
-                                            out_f.write(sm.get("match", {}).get("text", "") + "\n")
-                                    else:
-                                        line_text = data.get("lines", {}).get("text", "").rstrip("\r\n")
-                                        line_no = data.get("line_number", 0)
-                                        path_text = data.get("path", {}).get("text", "")
-                                        out_f.write(f"[{path_text}:{line_no}] {line_text}\n")
-                            except Exception:
-                                pass
+                    for raw_line in proc.stdout:
+                        if stop_event and stop_event.is_set():
+                            proc.terminate()
+                            break
+                        out_f.write(raw_line)
+                        total_matches += 1
 
-                            now = time.monotonic()
-                            if progress_callback and (now - last_telemetry_emit >= 0.5):
-                                last_telemetry_emit = now
-                                progress_callback({"matches_so_far": total_matches})
-                    else:
-                        for raw_line in proc.stdout:
-                            if stop_event and stop_event.is_set():
-                                proc.terminate()
-                                break
-                            line = raw_line.decode("utf-8", errors="replace")
-                            out_f.write(line)
-                            total_matches += 1
-
-                            now = time.monotonic()
-                            if progress_callback and (now - last_telemetry_emit >= 0.5):
-                                last_telemetry_emit = now
-                                progress_callback({"matches_so_far": total_matches})
+                        now = time.monotonic()
+                        if progress_callback and (now - last_telemetry_emit >= 0.5):
+                            last_telemetry_emit = now
+                            progress_callback({"matches_so_far": total_matches})
 
                     proc.stdout.close()
 
