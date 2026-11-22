@@ -7,6 +7,25 @@ let authToken = localStorage.getItem("yuri_auth_token") || "";
 let activeJobId = null;
 let ws = null;
 
+// --- Centralized API Client with Auto-Auth Handling ---
+async function apiFetch(url, options = {}) {
+  const headers = options.headers || {};
+  if (authToken) {
+    headers["Authorization"] = `Bearer ${authToken}`;
+  }
+  options.headers = headers;
+
+  const res = await fetch(url, options);
+  if (res.status === 401) {
+    console.warn("Session expired or unauthorized. Showing login modal.");
+    localStorage.removeItem("yuri_auth_token");
+    authToken = "";
+    document.getElementById("authOverlay").style.display = "flex";
+    throw new Error("Session expired. Please sign in again.");
+  }
+  return res;
+}
+
 // --- DOM Ready Initialization ---
 document.addEventListener("DOMContentLoaded", () => {
   initAuth();
@@ -208,9 +227,7 @@ function onJobFinished(job) {
 // --- Dashboard & System Profile ---
 async function loadSystemProfile() {
   try {
-    const res = await fetch("/api/system/profile", {
-      headers: { Authorization: `Bearer ${authToken}` },
-    });
+    const res = await apiFetch("/api/system/profile");
     if (!res.ok) return;
     const p = await res.json();
     document.getElementById("sysPlatform").textContent = p.platform.toUpperCase();
@@ -323,9 +340,7 @@ function initJobControls() {
 // --- Jobs & Checkpoints History ---
 async function loadJobHistory() {
   try {
-    const res = await fetch("/api/jobs/list", {
-      headers: { Authorization: `Bearer ${authToken}` },
-    });
+    const res = await apiFetch("/api/jobs/list");
     if (!res.ok) return;
     const data = await res.json();
     const tbody = document.getElementById("historyTableBody");
@@ -357,10 +372,7 @@ async function loadJobHistory() {
 }
 
 window.resumeJob = async (jobId) => {
-  await fetch(`/api/jobs/${jobId}/resume`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${authToken}` },
-  });
+  await apiFetch(`/api/jobs/${jobId}/resume`, { method: "POST" });
   switchTab("liveMonitorTab");
 };
 
@@ -476,9 +488,7 @@ async function handleChunkedUpload(file) {
 async function loadDirectory(path = "") {
   try {
     const url = path ? `/api/fs/browse?path=${encodeURIComponent(path)}` : "/api/fs/browse";
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${authToken}` },
-    });
+    const res = await apiFetch(url);
     if (!res.ok) return;
 
     const data = await res.json();
@@ -531,9 +541,7 @@ async function loadServerLogs() {
   const linesCount = document.getElementById("logLinesSelect").value || 250;
 
   try {
-    const res = await fetch(`/api/logs/recent?lines=${linesCount}`, {
-      headers: { Authorization: `Bearer ${authToken}` },
-    });
+    const res = await apiFetch(`/api/logs/recent?lines=${linesCount}`);
     if (!res.ok) return;
     const data = await res.json();
     terminal.textContent = data.logs.join("\n");
@@ -619,9 +627,7 @@ function initSettings() {
 
 async function loadSettings() {
   try {
-    const res = await fetch("/api/settings", {
-      headers: { Authorization: `Bearer ${authToken}` },
-    });
+    const res = await apiFetch("/api/settings");
     if (!res.ok) return;
     const s = await res.json();
     document.getElementById("setTgEnabled").checked = s.tg_enabled;

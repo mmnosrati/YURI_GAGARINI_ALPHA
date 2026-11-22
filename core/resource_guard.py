@@ -108,20 +108,23 @@ class ResourceGuard:
 
     def compute_optimal_workers(self, cpu_count: int, available_ram: int, current_load: float) -> int:
         """Determines safe concurrency worker count without oversubscription."""
-        # Baseline workers
+        # On weak/constrained VPS servers (e.g. 1-2 cores, <= 2GB RAM):
+        # Cap to 1 or 2 threads to prevent locking SSH or system freeze
         if cpu_count <= 1:
             return 1
+        elif cpu_count <= 2 or available_ram < 1500 * 1024 * 1024:
+            return max(1, min(2, cpu_count))
         elif cpu_count <= 4:
             base = max(1, cpu_count - 1)
         else:
-            base = max(1, int(cpu_count * 0.75))
+            base = max(2, int(cpu_count * 0.75))
 
-        # Check memory bounds (allow at least 250MB per worker)
-        ram_constrained = max(1, int(available_ram // (250 * 1024 * 1024)))
+        # Check memory bounds (allow at least 300MB per worker)
+        ram_constrained = max(1, int(available_ram // (300 * 1024 * 1024)))
         safe_workers = min(base, ram_constrained)
 
-        # Load check
-        if current_load > (cpu_count * 0.85):
+        # Severe load check (> 80% CPU load average) -> cut concurrency in half
+        if current_load > (cpu_count * 0.80):
             safe_workers = max(1, safe_workers // 2)
 
         return safe_workers

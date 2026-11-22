@@ -2,16 +2,19 @@
 Ripgrep Native Rust Engine Wrapper.
 Provides extreme search speeds (multi-gigabytes per second) across massive text datasets.
 Auto-detects system ripgrep binary or falls back to project local bin/rg.
+Non-blocking streaming with live telemetry and deadlock prevention.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,8 +32,7 @@ class RipgrepOptions:
     case_sensitive: bool = False      # Strict case sensitivity
     max_count: Optional[int] = None   # Limit matches
     memory_limit: Optional[str] = None # Memory limit, e.g. "2G"
-    extract_only: bool = True         # Only print matching parts (-o)
-    invert_match: bool = False        # Invert match (-v)
+    extract_only: bool = True         # Only print matching parts
     no_ignore: bool = True            # Do not respect .gitignore
     hidden: bool = False              # Search hidden files
 
@@ -49,7 +51,7 @@ class RipgrepEngine:
         if override_path and Path(override_path).exists():
             return override_path
 
-        # 1. System PATH
+        # 1. System PATH (/usr/bin/rg on Linux, etc.)
         system_rg = shutil.which("rg")
         if system_rg:
             return system_rg
@@ -96,7 +98,7 @@ class RipgrepEngine:
         if json_mode:
             cmd.append("--json")
 
-        # Threads
+        # Threads (concurrency cap)
         if options.threads > 0:
             cmd.extend(["--threads", str(options.threads)])
 
@@ -131,9 +133,7 @@ class RipgrepEngine:
             cmd.append("--multiline")
 
         # Output formatting & Mode
-        if json_mode:
-            cmd.append("--json")
-        else:
+        if not json_mode:
             if options.extract_only:
                 cmd.append("--only-matching")
             cmd.append("--line-number")
@@ -159,13 +159,13 @@ class RipgrepEngine:
         output_file: Path,
         options: Optional[RipgrepOptions] = None,
         is_regex: bool = False,
-        progress_callback: Optional[Callable[[int, float], None]] = None,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        stop_event: Optional[threading.Event] = None,
     ) -> Tuple[int, float]:
         """
         Executes ripgrep directly streaming to output file on disk for maximum I/O throughput.
-        Uses JSON mode for robust match counting and extraction.
+        Non-blocking read loops guarantee real-time telemetry and zero deadlocks.
         """
-        import json
         opts = options or RipgrepOptions()
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -176,8 +176,6 @@ class RipgrepEngine:
             tf.close()
             temp_pat_file = Path(tf.name)
 
-        # Decide mode: use direct high-speed text streaming for fixed strings / high throughput,
-        # or JSON mode when multi-line regex structured parsing is required.
         use_json = is_regex
 
         cmd = self.build_command(
@@ -189,22 +187,37 @@ class RipgrepEngine:
             json_mode=use_json,
         )
 
-        logger.info("Executing Ripgrep (JSON stream): %s", " ".join(cmd[:10]) + ("..." if len(cmd) > 10 else ""))
+        logger.info("Executing Ripgrep: %s", " ".join(cmd[:12]) + ("..." if len(cmd) > 12 else ""))
         start_t = time.monotonic()
         total_matches = 0
+        last_telemetry_emit = 0.0
 
         try:
-            with open(output_file, "w", encoding="utf-8", errors="replace", buffering=4 * 1024 * 1024) as out_f:
+            with open(output_file, "a", encoding="utf-8", errors="replace", buffering=2 * 1024 * 1024) as out_f:
                 proc = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    bufsize=4 * 1024 * 1024,
+                    bufsize=2 * 1024 * 1024,
                 )
+
+                # Drain stderr in separate thread to prevent pipe deadlocks
+                stderr_data = []
+
+                def drain_stderr():
+                    if proc.stderr:
+                        for err_line in proc.stderr:
+                            stderr_data.append(err_line)
+
+                err_thread = threading.Thread(target=drain_stderr, daemon=True)
+                err_thread.start()
 
                 if proc.stdout:
                     if use_json:
                         for raw_line in proc.stdout:
+                            if stop_event and stop_event.is_set():
+                                proc.terminate()
+                                break
                             try:
                                 item = json.loads(raw_line)
                                 msg_type = item.get("type")
@@ -222,19 +235,29 @@ class RipgrepEngine:
                                         out_f.write(f"[{path_text}:{line_no}] {line_text}\n")
                             except Exception:
                                 pass
+
+                            now = time.monotonic()
+                            if progress_callback and (now - last_telemetry_emit >= 0.5):
+                                last_telemetry_emit = now
+                                progress_callback({"matches_so_far": total_matches})
                     else:
-                        # Raw native speed streaming (500+ MB/s)
                         for raw_line in proc.stdout:
+                            if stop_event and stop_event.is_set():
+                                proc.terminate()
+                                break
                             line = raw_line.decode("utf-8", errors="replace")
                             out_f.write(line)
                             total_matches += 1
 
+                            now = time.monotonic()
+                            if progress_callback and (now - last_telemetry_emit >= 0.5):
+                                last_telemetry_emit = now
+                                progress_callback({"matches_so_far": total_matches})
+
                     proc.stdout.close()
 
-                if proc.stderr:
-                    proc.stderr.close()
-
                 proc.wait()
+                err_thread.join(timeout=1.0)
 
         finally:
             if temp_pat_file and temp_pat_file.exists():

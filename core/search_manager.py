@@ -182,17 +182,30 @@ class SearchManager:
             target,
             len(files),
             total_bytes / (1024 ** 3),
-            "Regex" if self.config.is_regex else "Aho-Corasick",
+            "Ripgrep" if self.config.engine_type == "ripgrep" else ("Regex" if self.config.is_regex else "Aho-Corasick"),
         )
 
-        # Check if Ripgrep can be utilized for extreme throughput
+        # Primary Search Engine: Ripgrep Native Rust
         rg_engine = RipgrepEngine()
         use_rg = (self.config.engine_type == "ripgrep" or self.config.engine_type == "") and rg_engine.is_available()
 
         if use_rg:
-            logger.info("Using Ripgrep Native Rust Engine for ultra-fast multi-GB scanning.")
+            # Dynamically compute safe worker threads based on server resource profile
+            safe_threads = self.config.rg_threads
+            if not safe_threads:
+                # Let ResourceGuard compute optimal threads according to CPU cores & available RAM
+                safe_threads = self.system_profile.recommended_workers
+
+            logger.info(
+                "Ripgrep active: %d threads (self-tuned) | MMAP=%s | PCRE2=%s | Target: %s",
+                safe_threads,
+                self.config.rg_mmap,
+                self.config.rg_pcre2,
+                target,
+            )
+
             rg_opts = RipgrepOptions(
-                threads=self.config.rg_threads or (self.config.num_workers or 0),
+                threads=safe_threads,
                 mmap=self.config.rg_mmap,
                 pcre2=self.config.rg_pcre2,
                 smart_case=self.config.rg_smart_case,
@@ -202,12 +215,41 @@ class SearchManager:
                 no_ignore=True,
             )
 
+            accumulated_matches = 0
+            accumulated_bytes = 0
+
+            # Progress bridge callback
+            def rg_progress(telemetry: Dict[str, Any]):
+                nonlocal accumulated_matches
+                matches_so_far = telemetry.get("matches_so_far", 0)
+                now = time.monotonic()
+                elapsed = max(0.001, now - started_at)
+                # Estimate bytes by elapsed throughput
+                current_spd = (accumulated_bytes / (1024 * 1024)) / elapsed if accumulated_bytes > 0 else 0.0
+
+                if self.progress_callback:
+                    self.progress_callback({
+                        "job_id": self.job_id,
+                        "file_current": target.name if target.is_file() else f"Multi-file cluster ({len(files)} files)",
+                        "file_index": len(files),
+                        "total_files": len(files),
+                        "percent": 50.0,
+                        "speed_mb_s": round(current_spd, 2),
+                        "eta_seconds": 0,
+                        "total_matches": matches_so_far,
+                        "bytes_processed": accumulated_bytes,
+                        "total_bytes": total_bytes,
+                    })
+
+            # Execute Ripgrep across target
             total_matches, elapsed = rg_engine.execute_stream(
                 patterns=self.config.patterns,
                 target_path=str(target),
                 output_file=output_path,
                 options=rg_opts,
                 is_regex=self.config.is_regex,
+                progress_callback=rg_progress,
+                stop_event=self._stop_requested,
             )
 
             # Post-process output (compression if enabled)
@@ -217,6 +259,21 @@ class SearchManager:
 
             mb_scanned = total_bytes / (1024 * 1024)
             throughput = mb_scanned / max(0.001, elapsed)
+
+            # Final 100% progress notification
+            if self.progress_callback:
+                self.progress_callback({
+                    "job_id": self.job_id,
+                    "file_current": "Complete",
+                    "file_index": len(files),
+                    "total_files": len(files),
+                    "percent": 100.0,
+                    "speed_mb_s": round(throughput, 2),
+                    "eta_seconds": 0,
+                    "total_matches": total_matches,
+                    "bytes_processed": total_bytes,
+                    "total_bytes": total_bytes,
+                })
 
             return SearchResult(
                 job_id=self.job_id,

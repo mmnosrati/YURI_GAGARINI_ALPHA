@@ -78,15 +78,23 @@ class AuthManager:
             self._failed_attempts.pop(client_ip, None)
         return False
 
+    def _generate_signed_token(self) -> str:
+        """Generates a cryptographic HMAC-signed token that survives server restarts."""
+        expiry = int(time.time() + 86400 * 30)  # 30 days validity
+        signing_key = self.config.admin_password_hash.encode("utf-8")
+        payload = f"admin:{expiry}".encode("utf-8")
+        sig = hmac.new(signing_key, payload, hashlib.sha256).hexdigest()
+        return f"admin:{expiry}:{sig}"
+
     def authenticate(self, password: str, client_ip: str = "127.0.0.1") -> Optional[str]:
-        """Validates password and creates an active session token."""
+        """Validates password and creates a persistent signed session token."""
         if self.is_locked_out(client_ip):
             return None
 
         if self.verify_password(password, self.config.admin_password_hash):
             self._failed_attempts.pop(client_ip, None)
-            token = secrets.token_urlsafe(32)
-            self._active_sessions[token] = time.time() + 86400 * 7  # 7-day session
+            token = self._generate_signed_token()
+            self._active_sessions[token] = time.time() + 86400 * 30
             return token
         else:
             fails = self._failed_attempts.get(client_ip, 0) + 1
@@ -96,15 +104,29 @@ class AuthManager:
             return None
 
     def validate_token(self, token: Optional[str]) -> bool:
-        """Validates a session token or static API token."""
+        """Validates a signed cryptographic token or static admin token."""
         if not token:
             return False
 
-        # Check static admin token from config
+        # 1. Check static admin token from config
         if self.config.admin_token and hmac.compare_digest(token, self.config.admin_token):
             return True
 
-        # Check active session token
+        # 2. Check signed cryptographic token (survives reboots)
+        try:
+            parts = token.split(":")
+            if len(parts) == 3 and parts[0] == "admin":
+                expiry = int(parts[1])
+                client_sig = parts[2]
+                if time.time() < expiry:
+                    signing_key = self.config.admin_password_hash.encode("utf-8")
+                    expected_sig = hmac.new(signing_key, f"admin:{expiry}".encode("utf-8"), hashlib.sha256).hexdigest()
+                    if hmac.compare_digest(client_sig, expected_sig):
+                        return True
+        except Exception:
+            pass
+
+        # 3. Check in-memory session token fallback
         expiry = self._active_sessions.get(token)
         if expiry and time.time() < expiry:
             return True
