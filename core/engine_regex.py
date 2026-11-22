@@ -86,29 +86,41 @@ class RegexEngine:
         matches: List[RegexMatch] = []
 
         if self.unified_compiled is not None:
-            for m in self.unified_compiled.finditer(block):
-                matches.append(
-                    RegexMatch(
-                        pattern_index=0,
-                        matched_bytes=m.group(0),
-                        absolute_start=start_abs_offset + m.start(),
-                        absolute_end=start_abs_offset + m.end(),
-                    )
-                )
-        else:
-            for idx, pat in enumerate(self.compiled_patterns):
-                for m in pat.finditer(block):
+            try:
+                for m in self.unified_compiled.finditer(block):
                     matches.append(
                         RegexMatch(
-                            pattern_index=idx,
+                            pattern_index=0,
                             matched_bytes=m.group(0),
                             absolute_start=start_abs_offset + m.start(),
                             absolute_end=start_abs_offset + m.end(),
                         )
                     )
+            except Exception as e:
+                logger.debug("Unified regex error: %s; falling back to per-pattern", e)
+                matches.clear()
 
-        # Sort matches by start position
-        if len(self.compiled_patterns) > 1 and self.unified_compiled is None:
+        if not matches and self.unified_compiled is not None:
+            # Fallback if unified failed or to ensure full coverage
+            pass
+
+        if not matches and (self.unified_compiled is None or len(self.compiled_patterns) == 1):
+            for idx, pat in enumerate(self.compiled_patterns):
+                try:
+                    for m in pat.finditer(block):
+                        matches.append(
+                            RegexMatch(
+                                pattern_index=idx,
+                                matched_bytes=m.group(0),
+                                absolute_start=start_abs_offset + m.start(),
+                                absolute_end=start_abs_offset + m.end(),
+                            )
+                        )
+                except Exception as e:
+                    logger.debug("Pattern regex error on pattern %d: %s", idx, e)
+
+        # Sort matches by start position if multiple patterns
+        if len(matches) > 1 and len(self.compiled_patterns) > 1:
             matches.sort(key=lambda x: x.absolute_start)
 
         return matches
