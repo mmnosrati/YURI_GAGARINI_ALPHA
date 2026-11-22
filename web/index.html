@@ -185,15 +185,28 @@
             </div>
 
             <div class="grid-3">
-              <label class="checkbox-group">
-                <input type="checkbox" id="optCaseSensitive"> Case Sensitive
-              </label>
-              <label class="checkbox-group">
-                <input type="checkbox" id="optExtractOnly" checked> Extract Only (Match words only)
-              </label>
-              <label class="checkbox-group">
-                <input type="checkbox" id="optRecursive" checked> Scan Subfolders Recursively
-              </label>
+              <div class="form-group">
+                <label class="form-label">Output Result Formatting:</label>
+                <select id="optOutputFormat" class="select-input">
+                  <option value="clean" selected>Clean Line Only (No filename / line number - e.g. for URL lists)</option>
+                  <option value="separate">Separate Line Header (Filename on separate line, then matches)</option>
+                  <option value="prefix">Same-Line Prefix (filename:linenumber:content)</option>
+                  <option value="extract_only">Extract Keyword / Pattern Only (-o)</option>
+                </select>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 10px; justify-content: center; margin-top: 10px;">
+                <label class="checkbox-group">
+                  <input type="checkbox" id="optCaseSensitive"> Case Sensitive
+                </label>
+                <label class="checkbox-group">
+                  <input type="checkbox" id="optExtractOnly"> Extract Only (Match words only)
+                </label>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 10px; justify-content: center; margin-top: 10px;">
+                <label class="checkbox-group">
+                  <input type="checkbox" id="optRecursive" checked> Scan Subfolders Recursively
+                </label>
+              </div>
             </div>
 
             <div class="grid-2" style="margin-top: 16px;">
@@ -315,6 +328,8 @@
               <tr>
                 <th>Job ID</th>
                 <th>Target Path</th>
+                <th>Output File Name</th>
+                <th>Started (Client Time)</th>
                 <th>Status</th>
                 <th>Matches</th>
                 <th>Progress</th>
@@ -322,7 +337,7 @@
               </tr>
             </thead>
             <tbody id="historyTableBody">
-              <tr><td colspan="6" style="text-align: center; color: var(--text-dim);">No job records found.</td></tr>
+              <tr><td colspan="8" style="text-align: center; color: var(--text-dim);">No job records found.</td></tr>
             </tbody>
           </table>
         </div>
@@ -364,6 +379,13 @@
                 <label class="form-label">Telegram Chat ID:</label>
                 <input type="text" id="setTgChatId" class="input-text" placeholder="e.g. 987654321">
               </div>
+              <div class="form-group">
+                <label class="form-label">Multipart Splitting Size (MB):</label>
+                <input type="number" id="setTgChunkMb" class="input-text" value="45" min="10" max="50">
+              </div>
+              <label class="checkbox-group" style="margin-bottom: 16px;">
+                <input type="checkbox" id="setTgSendFile" checked> Automatically send output file to Telegram upon completion
+              </label>
               <div style="display: flex; gap: 12px; margin-top: 20px;">
                 <button type="submit" class="btn btn-cyan">Save Telegram Settings</button>
                 <button type="button" id="btnTestTg" class="btn btn-secondary">Test Connection</button>
@@ -372,6 +394,40 @@
           </div>
 
           <div class="card">
+            <div class="card-title">Engine Defaults & System Limits</div>
+            <form id="systemSettingsForm">
+              <div class="form-group">
+                <label class="form-label">Default Concurrency Threads:</label>
+                <select id="setDefaultThreads" class="select-input">
+                  <option value="0">Auto-tune based on hardware</option>
+                  <option value="1">1 Thread (Single Core VPS)</option>
+                  <option value="2">2 Threads (Constrained VPS)</option>
+                  <option value="4">4 Threads (Standard Node)</option>
+                  <option value="8">8 Threads (Dedicated Server)</option>
+                  <option value="16">16 Threads (High-End Cluster)</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">RAM Throttle Cap (%):</label>
+                <input type="number" id="setRamCap" class="input-text" value="85" min="40" max="95">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Default Upload Directory:</label>
+                <input type="text" id="setDefaultUploadDir" class="input-text" value="uploads">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Default Output Directory:</label>
+                <input type="text" id="setDefaultOutputDir" class="input-text" value="output">
+              </div>
+
+              <button type="submit" class="btn btn-cyan" style="margin-top: 10px;">Save Engine Limits</button>
+            </form>
+
+            <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 24px 0;">
+
             <div class="card-title">Security & Master Password</div>
             <form id="passwordSettingsForm">
               <div class="form-group">
@@ -380,15 +436,6 @@
               </div>
               <button type="submit" class="btn btn-primary" style="margin-top: 10px;">Update Password</button>
             </form>
-
-            <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 24px 0;">
-
-            <div class="card-title">Server Safety Limits</div>
-            <div class="form-group">
-              <label class="form-label">RAM Throttle Cap (%):</label>
-              <input type="number" id="setRamCap" class="input-text" value="85" min="50" max="95">
-            </div>
-            <button type="button" id="btnSaveLimits" class="btn btn-secondary">Save Resource Limits</button>
           </div>
         </div>
       </section>

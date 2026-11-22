@@ -201,13 +201,13 @@ function updateJobProgress(data) {
   document.getElementById("liveMatches").textContent = data.total_matches.toLocaleString();
 
   const eta = data.eta_seconds;
-  const etaStr = eta > 0 ? `${Math.floor(eta / 60)}m ${eta % 60}s` : "0s";
+  const etaStr = eta > 0 ? `${Math.floor(eta / 60)}m ${eta % 60}s` : "Calculating...";
   document.getElementById("liveEta").textContent = etaStr;
 
   document.getElementById("liveJobBadge").textContent = "RUNNING";
   document.getElementById("liveJobBadge").className = "status-pill status-running";
-  document.getElementById("liveCurrentFile").textContent = `Scanning: ${data.file_current} (${data.file_index}/${data.total_files})`;
-  document.getElementById("liveProgressBar").style.width = `${data.percent}%`;
+  document.getElementById("liveCurrentFile").textContent = `Scanning: ${data.file_current} (${data.percent}%)`;
+  document.getElementById("liveProgressBar").style.width = `${Math.max(2, data.percent)}%`;
 
   document.getElementById("btnPauseJob").disabled = false;
   document.getElementById("btnResumeJob").disabled = true;
@@ -252,8 +252,9 @@ function initSearchForm() {
     const engine_type = document.getElementById("searchEngineSelect").value;
     const is_regex = engine_type === "regex" || (engine_type === "ripgrep" && document.getElementById("rgPcre2Check").checked);
     const patterns = document.getElementById("searchPatterns").value;
+    const output_format = document.getElementById("optOutputFormat").value;
     const case_sensitive = document.getElementById("optCaseSensitive").checked;
-    const extract_only = document.getElementById("optExtractOnly").checked;
+    const extract_only = document.getElementById("optExtractOnly").checked || output_format === "extract_only";
     const recursive = document.getElementById("optRecursive").checked;
     const output_file = document.getElementById("searchOutput").value.trim();
     const compress_algo = document.getElementById("searchCompress").value;
@@ -263,22 +264,20 @@ function initSearchForm() {
     const rg_pcre2 = document.getElementById("rgPcre2Check").checked;
     const rg_smart_case = document.getElementById("rgSmartCaseCheck").checked;
 
-    appendTerminal(`[Search] Dispatching search request on: ${target_path} (Engine: ${engine_type.toUpperCase()})...`);
+    appendTerminal(`[Search] Launching scan on: ${target_path} (Engine: ${engine_type.toUpperCase()}, Format: ${output_format})...`);
     switchTab("liveMonitorTab");
 
     try {
-      const res = await fetch("/api/jobs/start", {
+      const res = await apiFetch("/api/jobs/start", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${authToken}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           target_path,
           patterns,
           engine_type,
           is_regex,
           case_sensitive,
+          output_format,
           extract_only,
           recursive,
           output_file,
@@ -347,21 +346,27 @@ async function loadJobHistory() {
     tbody.innerHTML = "";
 
     if (!data.jobs || data.jobs.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-dim);">No job records found.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-dim);">No job records found.</td></tr>`;
       return;
     }
 
     data.jobs.forEach((j) => {
       const tr = document.createElement("tr");
+      // Format time in client's local timezone
+      const startedDate = j.started_at ? new Date(j.started_at * 1000).toLocaleString() : (j.created_at ? new Date(j.created_at * 1000).toLocaleString() : "--");
+      const outFileName = j.output_file ? j.output_file.split(/[\/\\]/).pop() : "--";
+
       tr.innerHTML = `
         <td style="font-family: var(--font-mono); font-weight: 600;">${j.job_id}</td>
-        <td style="font-family: var(--font-mono); font-size: 12.5px;">${j.target_path}</td>
+        <td style="font-family: var(--font-mono); font-size: 12px;" title="${j.target_path}">${j.target_path.length > 30 ? j.target_path.slice(0, 15) + "..." + j.target_path.slice(-15) : j.target_path}</td>
+        <td style="font-family: var(--font-mono); font-size: 12px; color: var(--accent-cyan);">${outFileName}</td>
+        <td style="font-size: 12.5px; color: var(--text-muted);">${startedDate}</td>
         <td><span class="status-pill status-${j.status.toLowerCase()}">${j.status}</span></td>
         <td style="font-family: var(--font-mono);">${j.total_matches.toLocaleString()}</td>
         <td style="font-family: var(--font-mono);">${j.progress_percent}%</td>
         <td>
           ${j.status === "PAUSED" ? `<button class="btn btn-secondary" style="padding: 2px 8px; font-size: 11.5px;" onclick="resumeJob('${j.job_id}')">Resume</button>` : ""}
-          ${j.output_file ? `<a href="/api/results/download?file_path=${encodeURIComponent(j.output_file)}" class="btn btn-cyan" style="padding: 2px 8px; font-size: 11.5px; text-decoration: none;">Download</a>` : ""}
+          ${j.output_file ? `<a href="/api/results/download?file_path=${encodeURIComponent(j.output_file)}&token=${encodeURIComponent(authToken)}" class="btn btn-cyan" style="padding: 2px 8px; font-size: 11.5px; text-decoration: none;" download>Download</a>` : ""}
         </td>
       `;
       tbody.appendChild(tr);
@@ -567,23 +572,34 @@ function initSettings() {
     const tg_enabled = document.getElementById("setTgEnabled").checked;
     const tg_token = document.getElementById("setTgToken").value;
     const tg_chat_id = document.getElementById("setTgChatId").value;
+    const tg_chunk_mb = parseInt(document.getElementById("setTgChunkMb").value) || 45;
+    const tg_send_file = document.getElementById("setTgSendFile").checked;
 
-    const res = await fetch("/api/settings/update", {
+    const res = await apiFetch("/api/settings/update", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${authToken}`,
-      },
-      body: JSON.stringify({ tg_enabled, tg_token, tg_chat_id }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tg_enabled, tg_token, tg_chat_id, tg_chunk_mb, tg_send_file }),
     });
     if (res.ok) alert("Telegram configuration updated.");
   });
 
-  document.getElementById("btnTestTg").addEventListener("click", async () => {
-    const res = await fetch("/api/telegram/test", {
+  document.getElementById("systemSettingsForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const max_ram_throttle_percent = parseFloat(document.getElementById("setRamCap").value) || 85.0;
+    const default_upload_dir = document.getElementById("setDefaultUploadDir").value;
+    const default_output_dir = document.getElementById("setDefaultOutputDir").value;
+    const default_threads = parseInt(document.getElementById("setDefaultThreads").value) || 0;
+
+    const res = await apiFetch("/api/settings/update", {
       method: "POST",
-      headers: { Authorization: `Bearer ${authToken}` },
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ max_ram_throttle_percent, default_upload_dir, default_output_dir, default_threads }),
     });
+    if (res.ok) alert("System engine limits updated successfully.");
+  });
+
+  document.getElementById("btnTestTg").addEventListener("click", async () => {
+    const res = await apiFetch("/api/telegram/test", { method: "POST" });
     const d = await res.json();
     if (d.success) {
       alert(`Telegram Bot Verified Successfully! Username: @${d.bot_username}`);
@@ -595,32 +611,14 @@ function initSettings() {
   document.getElementById("passwordSettingsForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     const new_password = document.getElementById("setNewPassword").value;
-    const res = await fetch("/api/settings/update", {
+    const res = await apiFetch("/api/settings/update", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${authToken}`,
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ new_password }),
     });
     if (res.ok) {
       alert("Master admin password updated successfully!");
       document.getElementById("setNewPassword").value = "";
-    }
-  });
-
-  document.getElementById("btnSaveLimits").addEventListener("click", async () => {
-    const max_ram_throttle_percent = parseFloat(document.getElementById("setRamCap").value) || 85.0;
-    const res = await fetch("/api/settings/update", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${authToken}`,
-      },
-      body: JSON.stringify({ max_ram_throttle_percent }),
-    });
-    if (res.ok) {
-      alert("Server resource safety limit updated.");
     }
   });
 }
@@ -633,7 +631,13 @@ async function loadSettings() {
     document.getElementById("setTgEnabled").checked = s.tg_enabled;
     document.getElementById("setTgToken").value = s.tg_token;
     document.getElementById("setTgChatId").value = s.tg_chat_id;
+    document.getElementById("setTgChunkMb").value = s.tg_chunk_mb || 45;
+    if (s.tg_send_file !== undefined) {
+      document.getElementById("setTgSendFile").checked = s.tg_send_file;
+    }
     document.getElementById("setRamCap").value = s.max_ram_throttle_percent;
+    document.getElementById("setDefaultUploadDir").value = s.default_upload_dir || "uploads";
+    document.getElementById("setDefaultOutputDir").value = s.default_output_dir || "output";
   } catch (e) {
     console.error(e);
   }

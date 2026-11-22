@@ -83,11 +83,13 @@ job_queue = JobQueueManager(config=server_cfg, broadcast_callback=broadcast_even
 
 
 # Dependency: Authentication
-def require_admin(authorization: Optional[str] = Header(None)) -> bool:
+def require_admin(authorization: Optional[str] = Header(None), token_query: Optional[str] = Query(None, alias="token")) -> bool:
     token = None
     if authorization:
         parts = authorization.split(" ")
         token = parts[1] if len(parts) == 2 else parts[0]
+    elif token_query:
+        token = token_query
 
     if not auth_mgr.validate_token(token):
         raise HTTPException(
@@ -239,7 +241,8 @@ async def start_search_job(payload: Dict[str, Any], authorized: bool = Depends(r
         engine_type=str(payload.get("engine_type", "ripgrep")),
         is_regex=bool(payload.get("is_regex", False)),
         case_sensitive=bool(payload.get("case_sensitive", False)),
-        extract_only=bool(payload.get("extract_only", True)),
+        output_format=str(payload.get("output_format", "clean")),
+        extract_only=bool(payload.get("extract_only", False)),
         recursive=bool(payload.get("recursive", True)),
         skip_hidden=bool(payload.get("skip_hidden", True)),
         detailed_stats=bool(payload.get("detailed_stats", True)),
@@ -286,7 +289,12 @@ async def stop_job(job_id: str, authorized: bool = Depends(require_admin)):
 
 # --- Results & Download Endpoints ---
 @app.get("/api/results/download")
-async def download_result_file(file_path: str = Query(...), authorized: bool = Depends(require_admin)):
+async def download_result_file(
+    file_path: str = Query(...),
+    token: Optional[str] = Query(None),
+    authorization: Optional[str] = Header(None),
+):
+    require_admin(authorization=authorization, token_query=token)
     p = Path(file_path)
     if not p.exists() or not p.is_file():
         raise HTTPException(status_code=404, detail="Requested result file was not found.")
@@ -321,8 +329,14 @@ async def update_settings(payload: Dict[str, Any], authorized: bool = Depends(re
         server_cfg.tg_chat_id = str(payload["tg_chat_id"]).strip()
     if "tg_chunk_mb" in payload:
         server_cfg.tg_chunk_mb = int(payload["tg_chunk_mb"])
+    if "tg_send_file" in payload:
+        server_cfg.tg_send_file = bool(payload["tg_send_file"])
     if "max_ram_throttle_percent" in payload:
         server_cfg.max_ram_throttle_percent = float(payload["max_ram_throttle_percent"])
+    if "default_upload_dir" in payload:
+        server_cfg.default_upload_dir = str(payload["default_upload_dir"])
+    if "default_output_dir" in payload:
+        server_cfg.default_output_dir = str(payload["default_output_dir"])
 
     # Password update
     if payload.get("new_password"):

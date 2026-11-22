@@ -42,13 +42,16 @@ class AuthManager:
 
     @staticmethod
     def verify_password(password: str, stored_hash: str) -> bool:
-        """Verifies plain password against stored salt:hash, or plain text if unhashed."""
+        """Verifies plain password against stored salt:hash, or plain text if unhashed. Safely compares non-ASCII bytes."""
         if not stored_hash or not password:
             return False
 
-        # Support direct plain text match (e.g. if set manually in config.json)
-        if hmac.compare_digest(password, stored_hash):
-            return True
+        # Support direct plain text match using bytes to prevent non-ASCII TypeError in Python 3.14
+        try:
+            if hmac.compare_digest(password.encode("utf-8"), stored_hash.encode("utf-8")):
+                return True
+        except Exception:
+            pass
 
         try:
             parts = stored_hash.split(":")

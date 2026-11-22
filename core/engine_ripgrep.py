@@ -32,7 +32,9 @@ class RipgrepOptions:
     case_sensitive: bool = False      # Strict case sensitivity
     max_count: Optional[int] = None   # Limit matches
     memory_limit: Optional[str] = None # Memory limit, e.g. "2G"
-    extract_only: bool = True         # Only print matching parts
+    output_format: str = "clean"      # "clean" (match line only), "separate" (heading filename), "prefix" (file:line:content), "extract_only" (-o)
+    extract_only: bool = False        # Backward compatibility flag
+    invert_match: bool = False        # Invert match (-v)
     no_ignore: bool = True            # Do not respect .gitignore
     hidden: bool = False              # Search hidden files
 
@@ -132,12 +134,23 @@ class RipgrepEngine:
         if is_regex:
             cmd.append("--multiline")
 
-        # Output formatting & Mode
-        if not json_mode:
-            if options.extract_only:
-                cmd.append("--only-matching")
-            cmd.append("--line-number")
-            cmd.append("--color=never")
+        # Output formatting
+        effective_format = options.output_format
+        if options.extract_only:
+            effective_format = "extract_only"
+
+        if effective_format == "clean":
+            cmd.extend(["--no-filename", "--no-line-number"])
+        elif effective_format == "separate":
+            cmd.extend(["--with-filename", "--line-number", "--heading"])
+        elif effective_format == "prefix":
+            cmd.extend(["--with-filename", "--line-number", "--no-heading"])
+        elif effective_format == "extract_only":
+            cmd.extend(["--no-filename", "--no-line-number", "--only-matching"])
+        else:
+            cmd.extend(["--no-filename", "--no-line-number"])
+
+        cmd.append("--color=never")
 
         # Add Patterns
         if patterns_file and patterns_file.exists():

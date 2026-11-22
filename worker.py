@@ -41,6 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pattern", "-p", metavar="PATTERN", help="Keyword or regex pattern (use newline for multiple)")
     p.add_argument("--pattern-file", metavar="FILE", help="File containing search patterns (one per line)")
     p.add_argument("--output", "-o", metavar="FILE", help="Output file path")
+    p.add_argument("--format", choices=["clean", "separate", "prefix", "extract_only"], default="clean", help="Result format: clean (line only), separate (heading), prefix (file:line), extract_only")
     p.add_argument("--engine", choices=["ripgrep", "aho", "regex"], default="ripgrep", help="Search engine to employ")
     p.add_argument("--regex", action="store_true", help="Treat patterns as regular expressions (JIT compiled)")
     p.add_argument("--threads", type=int, default=0, help="Number of worker threads (0 = all cores)")
@@ -98,7 +99,8 @@ def main():
         engine_type=args.engine,
         is_regex=args.regex,
         case_sensitive=args.case_sensitive,
-        extract_only=not args.full_context,
+        output_format=args.format,
+        extract_only=args.format == "extract_only" or not args.full_context,
         recursive=not args.no_recursive,
         low_memory_mode=args.low_memory,
         chunk_bytes=args.chunk_bytes,

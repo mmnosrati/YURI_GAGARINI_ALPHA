@@ -426,8 +426,8 @@ class TestComplexRegexSuite55(unittest.TestCase):
     # 55. Full Context Output with Complex Regex
     def test_55_full_context_regex_output(self):
         pat = r"CRITICAL:\s+\w+"
-        data = b"INFO: normal event\nCRITICAL: core_dumped at memory 0x123\nDEBUG: done"
-        res, matches = self.scan_data(data, [pat], extract_only=False)
+        data = b"INFO: normal event\nCRITICAL: core_dumped at memory 0x123\nDEBUG: done\n"
+        res, matches = self.scan_data(data, [pat], extract_only=False, output_format="clean")
         self.assertEqual(res.total_matches, 1)
         # Verify output contains the line preview
         self.assertTrue(any("CRITICAL: core_dumped" in m for m in matches))
