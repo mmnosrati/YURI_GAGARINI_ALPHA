@@ -557,6 +557,21 @@ function initSettings() {
       document.getElementById("setNewPassword").value = "";
     }
   });
+
+  document.getElementById("btnSaveLimits").addEventListener("click", async () => {
+    const max_ram_throttle_percent = parseFloat(document.getElementById("setRamCap").value) || 85.0;
+    const res = await fetch("/api/settings/update", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({ max_ram_throttle_percent }),
+    });
+    if (res.ok) {
+      alert("Server resource safety limit updated.");
+    }
+  });
 }
 
 async function loadSettings() {

@@ -126,6 +126,8 @@ async def serve_index():
 @app.post("/api/auth/login")
 async def login(payload: Dict[str, str]):
     password = payload.get("password", "")
+    # Reload config in case config.json was edited manually on disk
+    auth_mgr.config = get_server_config()
     token = auth_mgr.authenticate(password)
     if not token:
         raise HTTPException(status_code=401, detail="Invalid administrator credentials.")
@@ -312,8 +314,9 @@ async def update_settings(payload: Dict[str, Any], authorized: bool = Depends(re
     # Password update
     if payload.get("new_password"):
         auth_mgr.set_admin_password(str(payload["new_password"]))
+    else:
+        save_server_config(server_cfg)
 
-    save_server_config(server_cfg)
     job_queue.telegram.update_credentials(
         server_cfg.tg_token,
         server_cfg.tg_chat_id,

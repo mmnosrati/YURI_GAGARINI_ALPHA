@@ -51,8 +51,6 @@ _GLOBAL_CONFIG: Optional[ServerConfig] = None
 
 def get_server_config(config_path: Path = CONFIG_PATH) -> ServerConfig:
     global _GLOBAL_CONFIG
-    if _GLOBAL_CONFIG is not None:
-        return _GLOBAL_CONFIG
 
     if config_path.exists():
         try:
@@ -62,6 +60,9 @@ def get_server_config(config_path: Path = CONFIG_PATH) -> ServerConfig:
             return _GLOBAL_CONFIG
         except Exception as e:
             logger.warning("Failed to load config.json, using defaults: %s", e)
+
+    if _GLOBAL_CONFIG is not None:
+        return _GLOBAL_CONFIG
 
     _GLOBAL_CONFIG = ServerConfig()
     save_server_config(_GLOBAL_CONFIG, config_path)

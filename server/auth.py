@@ -42,7 +42,14 @@ class AuthManager:
 
     @staticmethod
     def verify_password(password: str, stored_hash: str) -> bool:
-        """Verifies plain password against stored salt:hash."""
+        """Verifies plain password against stored salt:hash, or plain text if unhashed."""
+        if not stored_hash or not password:
+            return False
+
+        # Support direct plain text match (e.g. if set manually in config.json)
+        if hmac.compare_digest(password, stored_hash):
+            return True
+
         try:
             parts = stored_hash.split(":")
             if len(parts) != 2:
@@ -55,8 +62,10 @@ class AuthManager:
             return False
 
     def set_admin_password(self, new_password: str) -> None:
-        """Updates the master admin password."""
-        self.config.admin_password_hash = self.hash_password(new_password)
+        """Updates the master admin password and static token."""
+        hashed = self.hash_password(new_password)
+        self.config.admin_password_hash = hashed
+        self.config.admin_token = new_password  # Keep static token in sync for API calls
         save_server_config(self.config)
 
     def is_locked_out(self, client_ip: str) -> bool:
