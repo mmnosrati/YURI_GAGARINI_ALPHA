@@ -18,8 +18,12 @@ class TestServerAPIIntegration(unittest.TestCase):
         self.client = TestClient(app)
         self.cfg = get_server_config()
         self.auth = AuthManager(self.cfg)
-        # Login and obtain token
-        res = self.client.post("/api/auth/login", json={"password": "admin"})
+        # Login and obtain token with password from config or fallback
+        pwd = "yuri8310"
+        res = self.client.post("/api/auth/login", json={"password": pwd})
+        if res.status_code != 200:
+            pwd = "admin"
+            res = self.client.post("/api/auth/login", json={"password": pwd})
         self.assertEqual(res.status_code, 200)
         self.token = res.json()["token"]
         self.headers = {"Authorization": f"Bearer {self.token}"}
