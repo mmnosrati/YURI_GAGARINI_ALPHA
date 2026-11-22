@@ -382,28 +382,32 @@ class SearchManager:
                 if not chunk:
                     break
 
+                chunk_start_abs = bytes_read
                 block = carry + chunk
-                base_abs = bytes_read - len(carry)
+                base_abs = chunk_start_abs - len(carry)
                 bytes_read += len(chunk)
 
                 # Execute matching
+                # Guarantee: A match is newly discovered in this chunk iff m.absolute_end > chunk_start_abs
+                # Matches with absolute_end <= chunk_start_abs were already emitted in prior chunks.
                 if aho_engine:
                     matches, _ = aho_engine.scan_chunk(block, start_abs_offset=base_abs)
                     for m in matches:
-                        # Write match
-                        file_matches += 1
-                        if self.config.extract_only:
-                            fout.write(m.pattern_bytes.decode("utf-8", errors="replace") + "\n")
-                        else:
-                            fout.write(f"[{file_path.name}:{m.absolute_start}] {m.pattern_bytes.decode('utf-8', errors='replace')}\n")
+                        if m.absolute_end > chunk_start_abs:
+                            file_matches += 1
+                            if self.config.extract_only:
+                                fout.write(m.pattern_bytes.decode("utf-8", errors="replace") + "\n")
+                            else:
+                                fout.write(f"[{file_path.name}:{m.absolute_start}] {m.pattern_bytes.decode('utf-8', errors='replace')}\n")
                 elif regex_engine:
                     r_matches = regex_engine.scan_block(block, start_abs_offset=base_abs)
                     for rm in r_matches:
-                        file_matches += 1
-                        if self.config.extract_only:
-                            fout.write(rm.matched_bytes.decode("utf-8", errors="replace") + "\n")
-                        else:
-                            fout.write(f"[{file_path.name}:{rm.absolute_start}] {rm.matched_bytes.decode('utf-8', errors='replace')}\n")
+                        if rm.absolute_end > chunk_start_abs:
+                            file_matches += 1
+                            if self.config.extract_only:
+                                fout.write(rm.matched_bytes.decode("utf-8", errors="replace") + "\n")
+                            else:
+                                fout.write(f"[{file_path.name}:{rm.absolute_start}] {rm.matched_bytes.decode('utf-8', errors='replace')}\n")
 
                 # Boundary carry
                 carry = block[-overlap_len:] if (overlap_len and len(block) >= overlap_len) else block
