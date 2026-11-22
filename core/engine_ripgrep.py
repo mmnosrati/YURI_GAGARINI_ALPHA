@@ -134,8 +134,11 @@ class RipgrepEngine:
         if options.hidden:
             cmd.append("--hidden")
 
-        # Multi-line regex support
-        if is_regex:
+        # IMPORTANT: NEVER pass --multiline unless explicitly searching for patterns containing \n or \r!
+        # Ripgrep official docs: "WARNING: When multiline mode is enabled, ripgrep requires that each file
+        # is laid out contiguously in memory (either on heap or memory-mapped). On 800+ GB dumps, this triggers Linux OOM-Killer!"
+        has_multiline_pattern = is_regex and any(("\n" in p or "\\n" in p or "\\r" in p or "(?s)" in p) for p in patterns)
+        if has_multiline_pattern:
             cmd.append("--multiline")
 
         # Output formatting
