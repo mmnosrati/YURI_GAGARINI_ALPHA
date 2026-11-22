@@ -169,16 +169,15 @@ class ResourceGuard:
         """Lowers priority on Linux/Unix so SSH terminals and critical services remain responsive."""
         if hasattr(os, "nice"):
             try:
-                os.nice(10)  # Moderate background priority
+                os.nice(15)  # Background priority on Linux
             except OSError:
                 pass
 
-        # Try setting ionice if available on Linux
+        # Apply idle/best-effort I/O priority on Linux using ionice (class 3 = idle)
         if sys.platform.startswith("linux"):
             try:
-                import ctypes
-                libc = ctypes.CDLL("libc.so.6", use_errno=True)
-                # SYS_ioprio_set is architecture-dependent, best effort
+                import subprocess
+                subprocess.run(["ionice", "-c", "3", "-p", str(os.getpid())], capture_output=True, timeout=2)
             except Exception:
                 pass
 

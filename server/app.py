@@ -375,12 +375,15 @@ async def websocket_telemetry(websocket: WebSocket):
             }
         }))
 
-        # Keepalive loop
+        # Keepalive loop: gracefully handle disconnections without raising ASGI exceptions
         while True:
             data = await websocket.receive_text()
             if data == "ping":
-                await websocket.send_text(json.dumps({"event": "pong"}))
-    except WebSocketDisconnect:
+                try:
+                    await websocket.send_text(json.dumps({"event": "pong"}))
+                except Exception:
+                    break
+    except (WebSocketDisconnect, Exception):
         pass
     finally:
         if websocket in _active_ws:

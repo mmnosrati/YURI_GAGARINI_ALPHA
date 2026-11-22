@@ -181,7 +181,8 @@ class RipgrepEngine:
     ) -> Tuple[int, float]:
         """
         Executes ripgrep directly streaming to output file on disk for maximum I/O throughput.
-        Non-blocking read loops guarantee real-time telemetry and zero deadlocks.
+        Uses direct OS file descriptor redirection for 100% native kernel speed.
+        Monitors file size growth in background to provide real-time telemetry.
         """
         opts = options or RipgrepOptions()
         output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -193,7 +194,7 @@ class RipgrepEngine:
             tf.close()
             temp_pat_file = Path(tf.name)
 
-        # We execute ripgrep in direct raw output mode (NO JSON) for pure native throughput and clean formatting!
+        # Build clean raw command
         cmd = self.build_command(
             patterns=patterns,
             target_path=target_path,
@@ -205,46 +206,60 @@ class RipgrepEngine:
 
         logger.info("Executing Ripgrep: %s", " ".join(cmd[:12]) + ("..." if len(cmd) > 12 else ""))
         start_t = time.monotonic()
-        total_matches = 0
-        last_telemetry_emit = 0.0
+        proc = None
 
         try:
-            with open(output_file, "ab", buffering=4 * 1024 * 1024) as out_f:
+            with open(output_file, "wb") as out_f:
+                # Direct file descriptor redirect: Kernel-level throughput (Multi-GB/s)
                 proc = subprocess.Popen(
                     cmd,
-                    stdout=subprocess.PIPE,
+                    stdout=out_f,
                     stderr=subprocess.PIPE,
-                    bufsize=4 * 1024 * 1024,
                 )
 
-                # Drain stderr in separate thread to prevent pipe deadlocks
-                stderr_data = []
-
-                def drain_stderr():
-                    if proc.stderr:
-                        for err_line in proc.stderr:
-                            stderr_data.append(err_line)
-
-                err_thread = threading.Thread(target=drain_stderr, daemon=True)
-                err_thread.start()
-
-                if proc.stdout:
-                    for raw_line in proc.stdout:
-                        if stop_event and stop_event.is_set():
+                # Monitor progress and handle instant cancellation without artificial sleep delays
+                last_progress_check = 0.0
+                while proc.poll() is None:
+                    if stop_event and stop_event.is_set():
+                        logger.info("Terminating Ripgrep process due to stop request...")
+                        try:
                             proc.terminate()
-                            break
-                        out_f.write(raw_line)
-                        total_matches += 1
+                            proc.wait(timeout=1.0)
+                        except Exception:
+                            proc.kill()
+                        break
 
-                        now = time.monotonic()
-                        if progress_callback and (now - last_telemetry_emit >= 0.5):
-                            last_telemetry_emit = now
-                            progress_callback({"matches_so_far": total_matches})
+                    try:
+                        proc.wait(timeout=0.05)
+                    except subprocess.TimeoutExpired:
+                        pass
 
-                    proc.stdout.close()
+                    now = time.monotonic()
+                    if progress_callback and (now - last_progress_check >= 0.25):
+                        last_progress_check = now
+                        try:
+                            current_out_size = output_file.stat().st_size
+                            progress_callback({
+                                "out_bytes": current_out_size,
+                                "elapsed": max(0.001, now - start_t),
+                            })
+                        except Exception:
+                            pass
 
-                proc.wait()
-                err_thread.join(timeout=1.0)
+                # Ensure process finished and pipes closed
+                if proc.poll() is None:
+                    proc.wait()
+
+                # Read and close stderr cleanly to prevent ResourceWarning
+                if proc.stderr:
+                    try:
+                        if proc.returncode not in (0, 1):
+                            err_msg = proc.stderr.read().decode("utf-8", errors="replace")
+                            if err_msg.strip():
+                                logger.warning("Ripgrep stderr: %s", err_msg.strip())
+                        proc.stderr.close()
+                    except Exception:
+                        pass
 
         finally:
             if temp_pat_file and temp_pat_file.exists():
@@ -254,4 +269,17 @@ class RipgrepEngine:
                     pass
 
         elapsed = max(0.001, time.monotonic() - start_t)
+
+        # Count total matches directly from output file quickly
+        total_matches = 0
+        if output_file.exists():
+            with open(output_file, "rb") as f:
+                # Fast chunked line count
+                buf_size = 1024 * 1024
+                while True:
+                    chunk = f.read(buf_size)
+                    if not chunk:
+                        break
+                    total_matches += chunk.count(b"\n")
+
         return total_matches, elapsed

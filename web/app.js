@@ -250,6 +250,13 @@ function onJobFinished(job) {
   appendTerminal(`[Search Completed] Job ${job.job_id} finished. Matches: ${job.total_matches}`);
   document.getElementById("liveJobBadge").textContent = job.status;
   document.getElementById("liveJobBadge").className = `status-pill status-${job.status.toLowerCase()}`;
+  document.getElementById("liveProgressBar").style.width = job.status === "COMPLETED" ? "100%" : document.getElementById("liveProgressBar").style.width;
+  document.getElementById("liveCurrentFile").textContent = job.status === "COMPLETED" ? "Mission Finished" : "Mission Stopped";
+  document.getElementById("liveEta").textContent = "0s";
+  document.getElementById("liveMatches").textContent = (job.total_matches || 0).toLocaleString();
+  if (job.speed_mb_s) {
+    document.getElementById("liveSpeed").textContent = `${job.speed_mb_s.toFixed(2)} MB/s`;
+  }
   document.getElementById("btnPauseJob").disabled = true;
   document.getElementById("btnResumeJob").disabled = job.status === "PAUSED";
   document.getElementById("btnStopJob").disabled = true;
