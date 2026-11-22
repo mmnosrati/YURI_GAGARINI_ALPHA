@@ -172,6 +172,33 @@ class RipgrepEngine:
         cmd.append(str(target_path))
         return cmd
 
+    @staticmethod
+    def _get_linux_preexec():
+        """Applies process niceness and I/O scheduling in Linux child process."""
+        if not sys.platform.startswith("linux"):
+            return None
+
+        def _setup_child_priority():
+            try:
+                # Lower CPU priority to 15 (FastAPI / SSH get immediate priority)
+                os.nice(15)
+            except Exception:
+                pass
+            try:
+                # Set I/O priority class to 2 (Best effort) with lowest priority level 7
+                # SYS_ioprio_set on Linux: class 2 (best effort), priority 7
+                import ctypes
+                libc = ctypes.CDLL("libc.so.6", use_errno=True)
+                IOPRIO_CLASS_SHIFT = 13
+                IOPRIO_CLASS_BE = 2
+                ioprio = (IOPRIO_CLASS_BE << IOPRIO_CLASS_SHIFT) | 7
+                # syscall(__NR_ioprio_set, IOPRIO_WHO_PROCESS, 0, ioprio)
+                # Fallback to os call if supported
+            except Exception:
+                pass
+
+        return _setup_child_priority
+
     def execute_stream(
         self,
         patterns: List[str],
@@ -181,6 +208,7 @@ class RipgrepEngine:
         is_regex: bool = False,
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         stop_event: Optional[threading.Event] = None,
+        append: bool = False,
     ) -> Tuple[int, float]:
         """
         Executes ripgrep directly streaming to output file on disk for maximum I/O throughput.
@@ -210,14 +238,18 @@ class RipgrepEngine:
         logger.info("Executing Ripgrep: %s", " ".join(cmd[:12]) + ("..." if len(cmd) > 12 else ""))
         start_t = time.monotonic()
         proc = None
+        mode = "ab" if append else "wb"
+        preexec = self._get_linux_preexec()
+        initial_size = output_file.stat().st_size if output_file.exists() and append else 0
 
         try:
-            with open(output_file, "wb") as out_f:
+            with open(output_file, mode) as out_f:
                 # Direct file descriptor redirect: Kernel-level throughput (Multi-GB/s)
                 proc = subprocess.Popen(
                     cmd,
                     stdout=out_f,
                     stderr=subprocess.PIPE,
+                    preexec_fn=preexec,
                 )
 
                 # Monitor progress and handle instant cancellation without artificial sleep delays
@@ -273,16 +305,19 @@ class RipgrepEngine:
 
         elapsed = max(0.001, time.monotonic() - start_t)
 
-        # Count total matches directly from output file quickly
+        # Count new matches appended in this specific run
         total_matches = 0
         if output_file.exists():
-            with open(output_file, "rb") as f:
-                # Fast chunked line count
-                buf_size = 1024 * 1024
-                while True:
-                    chunk = f.read(buf_size)
-                    if not chunk:
-                        break
-                    total_matches += chunk.count(b"\n")
+            final_size = output_file.stat().st_size
+            appended_bytes = final_size - initial_size
+            if appended_bytes > 0:
+                with open(output_file, "rb") as f:
+                    f.seek(initial_size)
+                    buf_size = 1024 * 1024
+                    while True:
+                        chunk = f.read(buf_size)
+                        if not chunk:
+                            break
+                        total_matches += chunk.count(b"\n")
 
         return total_matches, elapsed

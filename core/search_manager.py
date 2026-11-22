@@ -194,15 +194,19 @@ class SearchManager:
             # Dynamically compute safe worker threads based on server resource profile
             safe_threads = self.config.rg_threads
             if not safe_threads:
-                # Let ResourceGuard compute optimal threads according to CPU cores & available RAM
                 safe_threads = self.system_profile.recommended_workers
 
+            # Strict PCRE2: ONLY enable PCRE2 if is_regex is explicitly True!
+            effective_pcre2 = self.config.is_regex and self.config.rg_pcre2
+
             logger.info(
-                "Ripgrep active: %d threads (self-tuned) | MMAP=%s | PCRE2=%s | Target: %s",
+                "Ripgrep active: %d threads | MMAP=%s | PCRE2=%s | Target: %s (%d files, %.2f GB)",
                 safe_threads,
                 self.config.rg_mmap,
-                self.config.rg_pcre2,
+                effective_pcre2,
                 target,
+                len(files),
+                total_bytes / (1024 ** 3),
             )
 
             # Determine effective format
@@ -213,7 +217,7 @@ class SearchManager:
             rg_opts = RipgrepOptions(
                 threads=safe_threads,
                 mmap=self.config.rg_mmap,
-                pcre2=self.config.rg_pcre2,
+                pcre2=effective_pcre2,
                 smart_case=self.config.rg_smart_case,
                 case_sensitive=self.config.case_sensitive,
                 output_format=fmt,
@@ -221,65 +225,72 @@ class SearchManager:
                 no_ignore=True,
             )
 
-            last_check_time = started_at
-            check_interval = 0.5  # Check progress every 500ms
+            # File-by-File high throughput execution pipeline
+            processed_bytes = 0
+            total_matches = 0
+            open(output_path, "wb").close()  # truncate or create output file
 
-            # Progress bridge callback
-            def rg_progress(telemetry: Dict[str, Any]):
-                nonlocal last_check_time
+            for idx, f_path in enumerate(files):
+                if self._stop_requested.is_set():
+                    logger.info("Search job %s stopped by user at file %d/%d.", self.job_id, idx, len(files))
+                    break
+
+                # Handle pause
+                while self._pause_requested.is_set() and not self._stop_requested.is_set():
+                    time.sleep(0.5)
+
+                f_size = f_path.stat().st_size
                 now = time.monotonic()
-                if now - last_check_time < check_interval:
-                    return
-
-                last_check_time = now
                 elapsed = max(0.001, now - started_at)
+                current_spd = (processed_bytes / (1024 * 1024)) / elapsed if processed_bytes > 0 else 0.0
+                pct = min(99.0, (processed_bytes / max(1, total_bytes)) * 100.0)
+                rem_bytes = max(0, total_bytes - processed_bytes)
+                eta_sec = int(rem_bytes / (max(1.0, current_spd) * 1024 * 1024)) if current_spd > 0 else 0
 
-                out_bytes = telemetry.get("out_bytes", 0)
-                # Count current matches roughly by average line size or output size
-                est_matches = max(0, out_bytes // 80)
-
-                # Realistic progressive speed calculation based on elapsed time and target size
-                # Baseline scanning speed expectation: 300 - 800 MB/s
-                est_scanned_mb = min(total_bytes / (1024 * 1024), elapsed * 450.0)
-                est_scanned_bytes = int(est_scanned_mb * 1024 * 1024)
-                current_spd = est_scanned_mb / elapsed
-
-                pct = min(98.5, (est_scanned_bytes / max(1, total_bytes)) * 100.0)
-                rem_bytes = max(0, total_bytes - est_scanned_bytes)
-                eta_sec = max(1, int(rem_bytes / (max(10.0, current_spd) * 1024 * 1024)))
-
+                # Send live telemetry BEFORE scanning each file
                 if self.progress_callback:
                     self.progress_callback({
                         "job_id": self.job_id,
-                        "file_current": target.name if target.is_file() else f"Cluster ({len(files)} files)",
-                        "file_index": len(files),
+                        "file_current": f_path.name,
+                        "file_index": idx + 1,
                         "total_files": len(files),
                         "percent": round(pct, 1),
                         "speed_mb_s": round(current_spd, 2),
                         "eta_seconds": eta_sec,
-                        "total_matches": est_matches,
-                        "bytes_processed": est_scanned_bytes,
+                        "total_matches": total_matches,
+                        "bytes_processed": processed_bytes,
                         "total_bytes": total_bytes,
                     })
 
-            # Execute Ripgrep across target
-            total_matches, elapsed = rg_engine.execute_stream(
-                patterns=self.config.patterns,
-                target_path=str(target),
-                output_file=output_path,
-                options=rg_opts,
-                is_regex=self.config.is_regex,
-                progress_callback=rg_progress,
-                stop_event=self._stop_requested,
-            )
+                # Execute ripgrep on this specific file, appending results directly to output_path
+                f_matches, _ = rg_engine.execute_stream(
+                    patterns=self.config.patterns,
+                    target_path=str(f_path),
+                    output_file=output_path,
+                    options=rg_opts,
+                    is_regex=self.config.is_regex,
+                    stop_event=self._stop_requested,
+                    append=True,
+                )
+
+                # Instantly release Linux Page Cache for this scanned file (Zero RAM accumulation)
+                try:
+                    with open(f_path, "rb") as fh:
+                        self.resource_guard.release_page_cache(fh.fileno(), 0, f_size)
+                except OSError:
+                    pass
+
+                processed_bytes += f_size
+                total_matches += f_matches
 
             # Post-process output (compression if enabled)
             final_output = output_path
             if self.config.compress_algo != "none" and output_path.exists():
                 final_output = self._compress_file(output_path, self.config.compress_algo, self.config.compress_level)
 
-            mb_scanned = total_bytes / (1024 * 1024)
-            throughput = mb_scanned / max(0.001, elapsed)
+            elapsed_total = max(0.001, time.monotonic() - started_at)
+            mb_scanned = processed_bytes / (1024 * 1024)
+            final_throughput = mb_scanned / elapsed_total
 
             # Final 100% progress notification
             if self.progress_callback:
@@ -289,10 +300,10 @@ class SearchManager:
                     "file_index": len(files),
                     "total_files": len(files),
                     "percent": 100.0,
-                    "speed_mb_s": round(throughput, 2),
+                    "speed_mb_s": round(final_throughput, 2),
                     "eta_seconds": 0,
                     "total_matches": total_matches,
-                    "bytes_processed": total_bytes,
+                    "bytes_processed": processed_bytes,
                     "total_bytes": total_bytes,
                 })
 
@@ -304,11 +315,11 @@ class SearchManager:
                 files_discovered=len(files),
                 files_searched=len(files),
                 files_with_matches=1 if total_matches > 0 else 0,
-                total_bytes_scanned=total_bytes,
+                total_bytes_scanned=processed_bytes,
                 total_matches=total_matches,
-                elapsed_seconds=round(elapsed, 3),
-                throughput_mb_s=round(throughput, 2),
-                success=True,
+                elapsed_seconds=round(elapsed_total, 3),
+                throughput_mb_s=round(final_throughput, 2),
+                success=not self._stop_requested.is_set(),
                 errors=[],
                 file_statistics={},
             )

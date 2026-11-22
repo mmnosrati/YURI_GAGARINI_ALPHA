@@ -22,6 +22,8 @@ class ServerConfig:
     port: int = 8000
     admin_password_hash: str = ""  # PBKDF2/SHA-256 hash or plain default on first run
     admin_token: str = ""
+    hardware_profile: str = "eco"  # "eco" (VPS Safe 1-2 cores), "balanced" (75% cores), "turbo" (100% cores Dedicated)
+    default_threads: int = 0      # 0 = auto-calculate based on profile
     tg_enabled: bool = False
     tg_token: str = ""
     tg_chat_id: str = ""

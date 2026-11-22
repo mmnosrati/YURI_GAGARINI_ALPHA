@@ -106,28 +106,24 @@ class ResourceGuard:
             posix_fadvise_supported=self._posix_fadvise_available,
         )
 
-    def compute_optimal_workers(self, cpu_count: int, available_ram: int, current_load: float) -> int:
-        """Determines safe concurrency worker count without oversubscription."""
-        # On weak/constrained VPS servers (e.g. 1-2 cores, <= 2GB RAM):
-        # Cap to 1 or 2 threads to prevent locking SSH or system freeze
-        if cpu_count <= 1:
-            return 1
-        elif cpu_count <= 2 or available_ram < 1500 * 1024 * 1024:
-            return max(1, min(2, cpu_count))
-        elif cpu_count <= 4:
-            base = max(1, cpu_count - 1)
+    def compute_optimal_workers(self, cpu_count: int, available_ram: int, current_load: float, profile: str = "eco") -> int:
+        """Determines safe concurrency worker count based on hardware profile."""
+        if profile == "turbo":
+            # Maximum dedicated server utilization: all CPU cores
+            return max(1, cpu_count)
+        elif profile == "balanced":
+            # Standard balanced mode: 75% CPU cores
+            return max(1, int(cpu_count * 0.75))
         else:
-            base = max(2, int(cpu_count * 0.75))
-
-        # Check memory bounds (allow at least 300MB per worker)
-        ram_constrained = max(1, int(available_ram // (300 * 1024 * 1024)))
-        safe_workers = min(base, ram_constrained)
-
-        # Severe load check (> 80% CPU load average) -> cut concurrency in half
-        if current_load > (cpu_count * 0.80):
-            safe_workers = max(1, safe_workers // 2)
-
-        return safe_workers
+            # "eco" / VPS Safe mode: guarantees SSH and Web panel stay snappy
+            if cpu_count <= 1:
+                return 1
+            elif cpu_count <= 2 or available_ram < 1500 * 1024 * 1024:
+                return max(1, min(2, cpu_count))
+            elif cpu_count <= 4:
+                return max(1, cpu_count - 1)
+            else:
+                return max(2, int(cpu_count * 0.5))
 
     def compute_optimal_chunk_size(self, available_ram: int, workers: int) -> int:
         """Calculates optimal buffer chunk size based on available system memory."""

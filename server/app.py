@@ -309,10 +309,13 @@ async def download_result_file(
 @app.get("/api/settings")
 async def get_settings(authorized: bool = Depends(require_admin)):
     return {
+        "hardware_profile": getattr(server_cfg, "hardware_profile", "eco"),
+        "default_threads": getattr(server_cfg, "default_threads", 0),
         "tg_enabled": server_cfg.tg_enabled,
         "tg_token": server_cfg.tg_token,
         "tg_chat_id": server_cfg.tg_chat_id,
         "tg_chunk_mb": server_cfg.tg_chunk_mb,
+        "tg_send_file": getattr(server_cfg, "tg_send_file", True),
         "max_ram_throttle_percent": server_cfg.max_ram_throttle_percent,
         "default_upload_dir": server_cfg.default_upload_dir,
         "default_output_dir": server_cfg.default_output_dir,
@@ -321,6 +324,10 @@ async def get_settings(authorized: bool = Depends(require_admin)):
 
 @app.post("/api/settings/update")
 async def update_settings(payload: Dict[str, Any], authorized: bool = Depends(require_admin)):
+    if "hardware_profile" in payload:
+        server_cfg.hardware_profile = str(payload["hardware_profile"])
+    if "default_threads" in payload:
+        server_cfg.default_threads = int(payload["default_threads"])
     if "tg_enabled" in payload:
         server_cfg.tg_enabled = bool(payload["tg_enabled"])
     if "tg_token" in payload:

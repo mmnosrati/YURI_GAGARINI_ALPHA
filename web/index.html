@@ -397,14 +397,25 @@
             <div class="card-title">Engine Defaults & System Limits</div>
             <form id="systemSettingsForm">
               <div class="form-group">
+                <label class="form-label">Server Hardware Profile:</label>
+                <select id="setHardwareProfile" class="select-input">
+                  <option value="eco" selected>Eco VPS Safe (1-2 Cores / Low RAM - Snappy Web & Zero Freeze)</option>
+                  <option value="balanced">Balanced Standard (75% Cores - Moderate Multi-Core Nodes)</option>
+                  <option value="turbo">Extreme Turbo Dedicated (100% Cores - Maximum Multi-GB/s Throughput)</option>
+                </select>
+              </div>
+
+              <div class="form-group">
                 <label class="form-label">Default Concurrency Threads:</label>
                 <select id="setDefaultThreads" class="select-input">
-                  <option value="0">Auto-tune based on hardware</option>
+                  <option value="0">Auto-tune based on hardware profile</option>
                   <option value="1">1 Thread (Single Core VPS)</option>
                   <option value="2">2 Threads (Constrained VPS)</option>
                   <option value="4">4 Threads (Standard Node)</option>
                   <option value="8">8 Threads (Dedicated Server)</option>
                   <option value="16">16 Threads (High-End Cluster)</option>
+                  <option value="32">32 Threads (Extreme Workstation)</option>
+                  <option value="64">64 Threads (Enterprise Cloud)</option>
                 </select>
               </div>
 

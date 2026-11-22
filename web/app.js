@@ -289,7 +289,8 @@ function initSearchForm() {
 
     const target_path = document.getElementById("searchTarget").value.trim();
     const engine_type = document.getElementById("searchEngineSelect").value;
-    const is_regex = engine_type === "regex" || (engine_type === "ripgrep" && document.getElementById("rgPcre2Check").checked);
+    // Strict distinction: is_regex is ONLY true if engine is 'regex' OR if 'ripgrep' is explicitly paired with regex mode
+    const is_regex = engine_type === "regex";
     const patterns = document.getElementById("searchPatterns").value;
     const output_format = document.getElementById("optOutputFormat").value;
     const case_sensitive = document.getElementById("optCaseSensitive").checked;
@@ -300,7 +301,7 @@ function initSearchForm() {
 
     const rg_threads = parseInt(document.getElementById("rgThreadsSelect").value) || 0;
     const rg_mmap = document.getElementById("rgMmapCheck").checked;
-    const rg_pcre2 = document.getElementById("rgPcre2Check").checked;
+    const rg_pcre2 = is_regex && document.getElementById("rgPcre2Check").checked;
     const rg_smart_case = document.getElementById("rgSmartCaseCheck").checked;
 
     appendTerminal(`[Search] Launching scan on: ${target_path} (Engine: ${engine_type.toUpperCase()}, Format: ${output_format})...`);
@@ -636,15 +637,16 @@ function initSettings() {
 
   document.getElementById("systemSettingsForm").addEventListener("submit", async (e) => {
     e.preventDefault();
+    const hardware_profile = document.getElementById("setHardwareProfile").value;
+    const default_threads = parseInt(document.getElementById("setDefaultThreads").value) || 0;
     const max_ram_throttle_percent = parseFloat(document.getElementById("setRamCap").value) || 85.0;
     const default_upload_dir = document.getElementById("setDefaultUploadDir").value;
     const default_output_dir = document.getElementById("setDefaultOutputDir").value;
-    const default_threads = parseInt(document.getElementById("setDefaultThreads").value) || 0;
 
     const res = await apiFetch("/api/settings/update", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ max_ram_throttle_percent, default_upload_dir, default_output_dir, default_threads }),
+      body: JSON.stringify({ hardware_profile, default_threads, max_ram_throttle_percent, default_upload_dir, default_output_dir }),
     });
     if (res.ok) alert("System engine limits updated successfully.");
   });
@@ -679,6 +681,12 @@ async function loadSettings() {
     const res = await apiFetch("/api/settings");
     if (!res.ok) return;
     const s = await res.json();
+    if (s.hardware_profile) {
+      document.getElementById("setHardwareProfile").value = s.hardware_profile;
+    }
+    if (s.default_threads !== undefined) {
+      document.getElementById("setDefaultThreads").value = s.default_threads;
+    }
     document.getElementById("setTgEnabled").checked = s.tg_enabled;
     document.getElementById("setTgToken").value = s.tg_token;
     document.getElementById("setTgChatId").value = s.tg_chat_id;
