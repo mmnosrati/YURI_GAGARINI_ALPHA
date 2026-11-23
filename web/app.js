@@ -253,16 +253,32 @@ function updateJobProgress(data) {
 
 function renderJobProgress(data) {
   activeJobId = data.job_id;
-  document.getElementById("liveSpeed").textContent = `${(data.speed_mb_s || 0).toFixed(2)} MB/s`;
+  const speed = data.speed_mb_s || 0;
+  document.getElementById("liveSpeed").textContent = `${speed.toFixed(2)} MB/s`;
   document.getElementById("liveMatches").textContent = (data.total_matches || 0).toLocaleString();
 
   const eta = data.eta_seconds || 0;
-  const etaStr = eta > 0 ? `${Math.floor(eta / 60)}m ${eta % 60}s` : "Calculating...";
+  let etaStr = "Calculating...";
+  if (eta > 0) {
+    const hours = Math.floor(eta / 3600);
+    const mins = Math.floor((eta % 3600) / 60);
+    const secs = eta % 60;
+    if (hours > 0) {
+      etaStr = `${hours}h ${mins}m ${secs}s`;
+    } else {
+      etaStr = `${mins}m ${secs}s`;
+    }
+  } else if (speed > 0) {
+    etaStr = "Finishing...";
+  }
   document.getElementById("liveEta").textContent = etaStr;
 
   document.getElementById("liveJobBadge").textContent = "RUNNING";
   document.getElementById("liveJobBadge").className = "status-pill status-running";
-  document.getElementById("liveCurrentFile").textContent = `Scanning: ${data.file_current} (${(data.percent || 0).toFixed(1)}%)`;
+  const pct = (data.percent !== undefined && data.percent !== null) ? Number(data.percent).toFixed(1) : "0.0";
+  const curFile = data.file_current || "Analyzing files...";
+  const fileIdxStr = (data.file_index && data.total_files) ? `[${data.file_index}/${data.total_files}] ` : "";
+  document.getElementById("liveCurrentFile").textContent = `Scanning: ${fileIdxStr}${curFile} (${pct}%)`;
   document.getElementById("liveProgressBar").style.width = `${Math.max(2, Math.min(100, data.percent || 0))}%`;
 
   document.getElementById("btnPauseJob").disabled = false;

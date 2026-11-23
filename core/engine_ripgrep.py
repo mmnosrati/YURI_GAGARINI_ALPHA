@@ -248,6 +248,9 @@ class RipgrepEngine:
         preexec = self._get_linux_preexec(opts.nice_level)
         initial_size = output_file.stat().st_size if output_file.exists() and append else 0
 
+        current_matches = 0
+        last_counted_offset = initial_size
+
         try:
             with open(output_file, mode) as out_f:
                 # Direct file descriptor redirect: Kernel-level throughput (Multi-GB/s)
@@ -280,8 +283,17 @@ class RipgrepEngine:
                         last_progress_check = now
                         try:
                             current_out_size = output_file.stat().st_size
+                            if current_out_size > last_counted_offset:
+                                with open(output_file, "rb") as probe_f:
+                                    probe_f.seek(last_counted_offset)
+                                    chunk = probe_f.read(current_out_size - last_counted_offset)
+                                    if chunk:
+                                        current_matches += chunk.count(b"\n")
+                                        last_counted_offset += len(chunk)
+
                             progress_callback({
                                 "out_bytes": current_out_size,
+                                "matches": current_matches,
                                 "elapsed": max(0.001, now - start_t),
                             })
                         except Exception:
@@ -311,19 +323,20 @@ class RipgrepEngine:
 
         elapsed = max(0.001, time.monotonic() - start_t)
 
-        # Count new matches appended in this specific run using fast 8MB buffered read
-        total_matches = 0
+        # Final read to ensure all remaining matches appended are counted
         if output_file.exists():
             final_size = output_file.stat().st_size
-            appended_bytes = final_size - initial_size
-            if appended_bytes > 0:
-                with open(output_file, "rb") as f:
-                    f.seek(initial_size)
-                    buf_size = 8 * 1024 * 1024
-                    while True:
-                        chunk = f.read(buf_size)
-                        if not chunk:
-                            break
-                        total_matches += chunk.count(b"\n")
+            if final_size > last_counted_offset:
+                try:
+                    with open(output_file, "rb") as probe_f:
+                        probe_f.seek(last_counted_offset)
+                        buf_size = 8 * 1024 * 1024
+                        while True:
+                            chunk = probe_f.read(buf_size)
+                            if not chunk:
+                                break
+                            current_matches += chunk.count(b"\n")
+                except Exception:
+                    pass
 
-        return total_matches, elapsed
+        return current_matches, elapsed

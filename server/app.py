@@ -103,10 +103,32 @@ def require_admin(authorization: Optional[str] = Header(None), token_query: Opti
     return True
 
 
+async def _hardware_telemetry_loop():
+    """Background task to continuously broadcast live hardware stats to all active WebSockets."""
+    while True:
+        try:
+            await asyncio.sleep(1.5)
+            if _active_ws:
+                prof = resource_guard.inspect_system()
+                broadcast_event({
+                    "event": "hardware",
+                    "data": {
+                        "cpu_load": round(prof.cpu_load_1m, 1),
+                        "ram_percent": round(prof.ram_usage_percent, 1),
+                        "ram_free_gb": round(prof.available_ram_bytes / (1024 ** 3), 2),
+                    }
+                })
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.debug("Error in hardware telemetry loop: %s", e)
+
+
 @app.on_event("startup")
 async def on_startup():
     global _loop
     _loop = asyncio.get_running_loop()
+    asyncio.create_task(_hardware_telemetry_loop())
     logger.info("YURI GAGARIN ALPHA Server started on %s:%d", server_cfg.host, server_cfg.port)
 
 
