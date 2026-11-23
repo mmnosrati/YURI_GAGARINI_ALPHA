@@ -1,7 +1,7 @@
 # موتور جستجوی کلان‌داده و پنل مدیریت سرور یوری گاگارین آلفا (YURI GAGARIN ALPHA)
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/mmnosrati/YURI_GAGARINI_ALPHA/master/assets/logo.svg" alt="YURI GAGARIN ALPHA" width="760" />
+  <img src="https://raw.githubusercontent.com/mmnosrati/YURI_GAGARINI_ALPHA/master/assets/logo.png" alt="YURI GAGARIN ALPHA" width="760" />
   <br /><br />
   <h3>پلتفرم فوق‌سریع پردازش، پالایش و جستجوی دیتابیس‌های چند صد گیگابایتی (Big-Data Search Engine)</h3>
   <p>

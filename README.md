@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/mmnosrati/YURI_GAGARINI_ALPHA/master/assets/logo.svg" alt="YURI GAGARIN ALPHA" width="760" />
+  <img src="https://raw.githubusercontent.com/mmnosrati/YURI_GAGARINI_ALPHA/master/assets/logo.png" alt="YURI GAGARIN ALPHA" width="760" />
   <br /><br />
   <h2>Enterprise High-Performance Big-Data Search Platform & Admin Web UI</h2>
   <p>
