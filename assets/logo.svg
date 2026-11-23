@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 140" width="100%" height="100%">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 140" width="760" height="140">
   <defs>
     <!-- Dark Space Glow Background -->
     <linearGradient id="bgGlow" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0F172A" stop-opacity="0.9" />
-      <stop offset="100%" stop-color="#030712" stop-opacity="0.95" />
+      <stop offset="0%" stop-color="#0F172A" />
+      <stop offset="100%" stop-color="#030712" />
     </linearGradient>
 
     <!-- Neon Cyan & Electric Violet Gradients -->
@@ -27,7 +27,7 @@
   </defs>
 
   <!-- Ambient Backdrop Pill -->
-  <rect x="4" y="4" width="752" height="132" rx="20" fill="url(#bgGlow)" stroke="url(#cyberNeon)" stroke-width="1.5" stroke-opacity="0.35" />
+  <rect x="4" y="4" width="752" height="132" rx="20" fill="url(#bgGlow)" stroke="url(#cyberNeon)" stroke-width="2" />
 
   <!-- Cosmonaut Crest Emblem (Left) -->
   <g transform="translate(30, 20)">

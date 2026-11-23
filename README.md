@@ -1,15 +1,20 @@
 <div align="center">
-  <img src="assets/logo.svg" alt="YURI GAGARIN ALPHA" width="100%" style="max-width: 950px; border-radius: 12px;" />
-  <br />
+  <img src="https://raw.githubusercontent.com/mmnosrati/YURI_GAGARINI_ALPHA/master/assets/logo.svg" alt="YURI GAGARIN ALPHA" width="760" />
+  <br /><br />
   <h2>Enterprise High-Performance Big-Data Search Platform & Admin Web UI</h2>
   <p>
     <b>Engineered to scan multi-hundred-gigabyte datasets (800+ GB across thousands of files) with zero server lockups, Linux Page Cache purging, hardware self-tuning, and ultra-high-throughput Rust SIMD acceleration (700+ MB/s).</b>
   </p>
 
   <p>
-    <img src="https://img.shields.io/badge/version-17.1%20Enterprise-38BDF8?style=flat-square" alt="Version" />
-    <img src="https://img.shields.io/badge/core-Ripgrep%20(Rust%20SIMD)%20%2B%20Aho--Corasick-10B981?style=flat-square" alt="Core Engines" />
-    <img src="https://img.shields.io/badge/throughput-740%2B%20MB%2Fs-FF4500?style=flat-square" alt="Throughput" />
+    <a href="README.fa.md"><b>نسخه فارسی (Persian Documentation)</b></a> &bull;
+    <a href="#-table-of-contents"><b>English Documentation</b></a>
+  </p>
+
+  <p>
+    <img src="https://img.shields.io/badge/version-17.2%20Enterprise-38BDF8?style=flat-square" alt="Version" />
+    <img src="https://img.shields.io/badge/core-Ripgrep%20(Rust%20SIMD)%20%2B%20PCRE2-10B981?style=flat-square" alt="Core Engines" />
+    <img src="https://img.shields.io/badge/throughput-750%2B%20MB%2Fs-FF4500?style=flat-square" alt="Throughput" />
     <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-6366F1?style=flat-square" alt="Platform" />
     <img src="https://img.shields.io/badge/license-MIT-F59E0B?style=flat-square" alt="License" />
   </p>
