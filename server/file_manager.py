@@ -183,3 +183,83 @@ class FileManager:
             "final_path": str(final_dest.resolve()),
             "size_bytes": final_dest.stat().st_size,
         }
+
+    def download_from_url(
+        self,
+        url: str,
+        target_dir: Optional[str] = None,
+        custom_filename: Optional[str] = None,
+        progress_callback: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        Direct stream download from HTTP/HTTPS URL directly to disk.
+        Memory-bounded (8MB buffer) with automatic filename discovery.
+        """
+        import urllib.request
+        from urllib.parse import urlparse, unquote
+
+        dest_dir = Path(target_dir) if target_dir else self.upload_dir
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        # Derive filename
+        if custom_filename and custom_filename.strip():
+            filename = Path(custom_filename.strip()).name
+        else:
+            parsed = urlparse(url)
+            derived = Path(unquote(parsed.path)).name
+            filename = derived if derived else f"download_{int(time.time())}.txt"
+
+        safe_filename = "".join(c for c in filename if c.isalnum() or c in ("-", "_", ".", " "))
+        if not safe_filename:
+            safe_filename = f"file_{int(time.time())}.txt"
+
+        dest_file = dest_dir / safe_filename
+        temp_file = self.temp_dir / f"tmp_dl_{int(time.time())}_{safe_filename}"
+
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "YURI-GAGARIN-ALPHA/17.0 (DataMining Stream Engine)"}
+        )
+
+        total_bytes = 0
+        downloaded = 0
+        started_at = time.time()
+
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response, open(temp_file, "wb") as out_f:
+                content_len = response.headers.get("Content-Length")
+                if content_len:
+                    total_bytes = int(content_len)
+
+                buf_size = 4 * 1024 * 1024  # 4MB streaming buffer
+                while True:
+                    chunk = response.read(buf_size)
+                    if not chunk:
+                        break
+                    out_f.write(chunk)
+                    downloaded += len(chunk)
+                    if progress_callback:
+                        progress_callback(downloaded, total_bytes)
+
+            shutil.move(str(temp_file), str(dest_file))
+            elapsed = max(0.001, time.time() - started_at)
+            speed_mb_s = (downloaded / (1024 * 1024)) / elapsed
+
+            logger.info("URL Download completed: %s -> %s (%.2f MB in %.2fs)", url, dest_file, downloaded / (1024*1024), elapsed)
+            return {
+                "success": True,
+                "url": url,
+                "filename": safe_filename,
+                "saved_path": str(dest_file.resolve()),
+                "size_bytes": downloaded,
+                "elapsed_seconds": round(elapsed, 2),
+                "speed_mb_s": round(speed_mb_s, 2),
+            }
+        except Exception as e:
+            if temp_file.exists():
+                try:
+                    temp_file.unlink()
+                except OSError:
+                    pass
+            logger.error("Failed downloading %s: %s", url, e)
+            raise RuntimeError(f"Download failed: {e}")

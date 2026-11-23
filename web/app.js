@@ -1,11 +1,13 @@
 /**
- * YURI GAGARIN ALPHA - Enterprise Web UI Dashboard Client
- * Complete Single Page Application (100% English)
+ * YURI GAGARIN ALPHA - Enterprise Big-Data Search Platform Dashboard
+ * Ultra-Responsive SPA Client v17.2
  */
 
 let authToken = localStorage.getItem("yuri_auth_token") || "";
 let activeJobId = null;
 let ws = null;
+let currentExplorerDirectory = "";
+let cachedJobs = [];
 
 // --- Centralized API Client with Auto-Auth Handling ---
 async function apiFetch(url, options = {}) {
@@ -30,10 +32,14 @@ async function apiFetch(url, options = {}) {
 document.addEventListener("DOMContentLoaded", () => {
   initAuth();
   initNavigation();
+  initMobileDrawer();
   initSearchForm();
   initFileManager();
+  initUrlDownloader();
+  initJobHistoryFilters();
   initSettings();
   initJobControls();
+  initServerLogActions();
 });
 
 // --- Authentication Subsystem ---
@@ -44,7 +50,6 @@ function initAuth() {
   const logoutBtn = document.getElementById("logoutBtn");
 
   if (authToken) {
-    // Validate token with backend using apiFetch to avoid premature logouts
     fetch("/api/auth/verify", {
       headers: { Authorization: `Bearer ${authToken}` },
     })
@@ -53,18 +58,15 @@ function initAuth() {
           overlay.style.display = "none";
           onAuthenticated();
         } else if (res.status === 401) {
-          // Only show overlay if explicit 401 from server
           localStorage.removeItem("yuri_auth_token");
           authToken = "";
           overlay.style.display = "flex";
         } else {
-          // If network glitch or 500, do NOT kick user out!
           overlay.style.display = "none";
           onAuthenticated();
         }
       })
       .catch(() => {
-        // Network timeout / connection pending: stay authenticated
         overlay.style.display = "none";
         onAuthenticated();
       });
@@ -112,8 +114,6 @@ function onAuthenticated() {
   loadDirectory();
   loadJobHistory();
   loadSettings();
-
-  // Restore active job monitor state if any job is currently RUNNING
   restoreActiveJobMonitor();
 }
 
@@ -122,7 +122,8 @@ async function restoreActiveJobMonitor() {
     const res = await apiFetch("/api/jobs/list");
     if (!res.ok) return;
     const data = await res.json();
-    const runningJob = (data.jobs || []).find((j) => j.status === "RUNNING");
+    cachedJobs = data.jobs || [];
+    const runningJob = cachedJobs.find((j) => j.status === "RUNNING");
     if (runningJob) {
       activeJobId = runningJob.job_id;
       document.getElementById("liveJobBadge").textContent = "RUNNING";
@@ -140,15 +141,37 @@ async function restoreActiveJobMonitor() {
   }
 }
 
-// --- Navigation Tabs ---
+// --- Navigation Tabs & Mobile Drawer ---
 function initNavigation() {
   const navItems = document.querySelectorAll(".nav-item");
   navItems.forEach((item) => {
     item.addEventListener("click", () => {
       const tabId = item.getAttribute("data-tab");
       switchTab(tabId);
+      closeMobileDrawer();
     });
   });
+}
+
+function initMobileDrawer() {
+  const menuBtn = document.getElementById("mobileMenuBtn");
+  const sidebar = document.getElementById("mainSidebar");
+  const backdrop = document.getElementById("sidebarOverlay");
+
+  if (menuBtn && sidebar && backdrop) {
+    menuBtn.addEventListener("click", () => {
+      sidebar.classList.toggle("open");
+      backdrop.classList.toggle("active");
+    });
+    backdrop.addEventListener("click", closeMobileDrawer);
+  }
+}
+
+function closeMobileDrawer() {
+  const sidebar = document.getElementById("mainSidebar");
+  const backdrop = document.getElementById("sidebarOverlay");
+  if (sidebar) sidebar.classList.remove("open");
+  if (backdrop) backdrop.classList.remove("active");
 }
 
 function switchTab(tabId) {
@@ -165,16 +188,18 @@ function switchTab(tabId) {
   const titles = {
     dashboardTab: "Cluster Dashboard",
     searchStudioTab: "Search Studio",
-    liveMonitorTab: "Live Monitor & Logs",
-    fileManagerTab: "File Manager & Chunked Upload",
-    historyTab: "Jobs & Checkpoint History",
-    serverLogsTab: "Server Diagnostic Logs (48h)",
+    liveMonitorTab: "Live Monitor & Speedometer",
+    fileManagerTab: "Files & Advanced Upload",
+    historyTab: "Jobs & Checkpoints History",
+    serverLogsTab: "Server Diagnostics (Rolling 48h)",
     settingsTab: "System Settings & Telegram",
   };
   pageTitle.textContent = titles[tabId] || "Workspace";
 
   if (tabId === "serverLogsTab") {
     loadServerLogs();
+  } else if (tabId === "historyTab") {
+    loadJobHistory();
   }
 }
 
@@ -231,7 +256,7 @@ function updateHardwareMeters(data) {
   document.getElementById("meterCpu").textContent = `${data.cpu_load.toFixed(1)}%`;
   document.getElementById("meterRam").textContent = `${data.ram_percent.toFixed(1)}%`;
   if (data.ram_free_gb) {
-    document.getElementById("meterDisk").textContent = `${data.ram_free_gb} GB RAM`;
+    document.getElementById("meterDisk").textContent = `${data.ram_free_gb} GB Free`;
   }
 }
 
@@ -263,11 +288,7 @@ function renderJobProgress(data) {
     const hours = Math.floor(eta / 3600);
     const mins = Math.floor((eta % 3600) / 60);
     const secs = eta % 60;
-    if (hours > 0) {
-      etaStr = `${hours}h ${mins}m ${secs}s`;
-    } else {
-      etaStr = `${mins}m ${secs}s`;
-    }
+    etaStr = hours > 0 ? `${hours}h ${mins}m ${secs}s` : `${mins}m ${secs}s`;
   } else if (speed > 0) {
     etaStr = "Finishing...";
   }
@@ -276,7 +297,7 @@ function renderJobProgress(data) {
   document.getElementById("liveJobBadge").textContent = "RUNNING";
   document.getElementById("liveJobBadge").className = "status-pill status-running";
   const pct = (data.percent !== undefined && data.percent !== null) ? Number(data.percent).toFixed(1) : "0.0";
-  const curFile = data.file_current || "Analyzing files...";
+  const curFile = data.file_current || "Analyzing...";
   const fileIdxStr = (data.file_index && data.total_files) ? `[${data.file_index}/${data.total_files}] ` : "";
   document.getElementById("liveCurrentFile").textContent = `Scanning: ${fileIdxStr}${curFile} (${pct}%)`;
   document.getElementById("liveProgressBar").style.width = `${Math.max(2, Math.min(100, data.percent || 0))}%`;
@@ -310,10 +331,10 @@ async function loadSystemProfile() {
     if (!res.ok) return;
     const p = await res.json();
     document.getElementById("sysPlatform").textContent = p.platform.toUpperCase();
-    document.getElementById("sysCpuCount").textContent = p.cpu_count;
+    document.getElementById("sysCpuCount").textContent = `${p.cpu_count} Cores`;
     document.getElementById("sysTotalRam").textContent = `${p.total_ram_gb} GB`;
     document.getElementById("sysAvailRam").textContent = `${p.available_ram_gb} GB`;
-    document.getElementById("sysWorkers").textContent = p.recommended_workers;
+    document.getElementById("sysWorkers").textContent = `${p.recommended_workers} Workers`;
     document.getElementById("dashChunkSize").textContent = `${p.recommended_chunk_mb} MB`;
     document.getElementById("dashKernelOpt").textContent = p.posix_fadvise ? "Active (posix_fadvise)" : "Standard";
   } catch (e) {
@@ -329,7 +350,6 @@ function initSearchForm() {
 
     const target_path = document.getElementById("searchTarget").value.trim();
     const engine_type = document.getElementById("searchEngineSelect").value;
-    // Strict distinction: is_regex is ONLY true if engine is 'regex' OR if 'ripgrep' is explicitly paired with regex mode
     const is_regex = engine_type === "regex";
     const patterns = document.getElementById("searchPatterns").value;
     const output_format = document.getElementById("optOutputFormat").value;
@@ -345,8 +365,8 @@ function initSearchForm() {
     const rg_smart_case = document.getElementById("rgSmartCaseCheck").checked;
 
     appendTerminal(`[Search] Launching scan on: ${target_path} (Engine: ${engine_type.toUpperCase()}, Format: ${output_format})...`);
-    
-    // Reset Live Monitor UI for new job
+
+    // Reset Live Monitor UI
     document.getElementById("liveJobBadge").textContent = "STARTING";
     document.getElementById("liveJobBadge").className = "status-pill status-running";
     document.getElementById("liveCurrentFile").textContent = `Preparing target: ${target_path}`;
@@ -399,73 +419,91 @@ function initSearchForm() {
 function initJobControls() {
   document.getElementById("btnPauseJob").addEventListener("click", async () => {
     if (!activeJobId) return;
-    await fetch(`/api/jobs/${activeJobId}/pause`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${authToken}` },
-    });
+    await apiFetch(`/api/jobs/${activeJobId}/pause`, { method: "POST" });
     document.getElementById("btnPauseJob").disabled = true;
     document.getElementById("btnResumeJob").disabled = false;
   });
 
   document.getElementById("btnResumeJob").addEventListener("click", async () => {
     if (!activeJobId) return;
-    await fetch(`/api/jobs/${activeJobId}/resume`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${authToken}` },
-    });
+    await apiFetch(`/api/jobs/${activeJobId}/resume`, { method: "POST" });
     document.getElementById("btnPauseJob").disabled = false;
     document.getElementById("btnResumeJob").disabled = true;
   });
 
   document.getElementById("btnStopJob").addEventListener("click", async () => {
     if (!activeJobId) return;
-    if (confirm("Are you sure you want to stop this search?")) {
-      await fetch(`/api/jobs/${activeJobId}/stop`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${authToken}` },
-      });
+    if (confirm("Are you sure you want to stop this search mission?")) {
+      await apiFetch(`/api/jobs/${activeJobId}/stop`, { method: "POST" });
     }
   });
 }
 
-// --- Jobs & Checkpoints History ---
+// --- Jobs & Checkpoints History with Search and Deletion ---
+function initJobHistoryFilters() {
+  const searchInput = document.getElementById("historySearchInput");
+  if (searchInput) {
+    searchInput.addEventListener("input", () => {
+      renderJobHistoryTable(searchInput.value.trim().toLowerCase());
+    });
+  }
+}
+
 async function loadJobHistory() {
   try {
     const res = await apiFetch("/api/jobs/list");
     if (!res.ok) return;
     const data = await res.json();
-    const tbody = document.getElementById("historyTableBody");
-    tbody.innerHTML = "";
-
-    if (!data.jobs || data.jobs.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-dim);">No job records found.</td></tr>`;
-      return;
-    }
-
-    data.jobs.forEach((j) => {
-      const tr = document.createElement("tr");
-      // Format time in client's local timezone
-      const startedDate = j.started_at ? new Date(j.started_at * 1000).toLocaleString() : (j.created_at ? new Date(j.created_at * 1000).toLocaleString() : "--");
-      const outFileName = j.output_file ? j.output_file.split(/[\/\\]/).pop() : "--";
-
-      tr.innerHTML = `
-        <td style="font-family: var(--font-mono); font-weight: 600;">${j.job_id}</td>
-        <td style="font-family: var(--font-mono); font-size: 12px;" title="${j.target_path}">${j.target_path.length > 30 ? j.target_path.slice(0, 15) + "..." + j.target_path.slice(-15) : j.target_path}</td>
-        <td style="font-family: var(--font-mono); font-size: 12px; color: var(--accent-cyan);">${outFileName}</td>
-        <td style="font-size: 12.5px; color: var(--text-muted);">${startedDate}</td>
-        <td><span class="status-pill status-${j.status.toLowerCase()}">${j.status}</span></td>
-        <td style="font-family: var(--font-mono);">${j.total_matches.toLocaleString()}</td>
-        <td style="font-family: var(--font-mono);">${j.progress_percent}%</td>
-        <td>
-          ${j.status === "PAUSED" ? `<button class="btn btn-secondary" style="padding: 2px 8px; font-size: 11.5px;" onclick="resumeJob('${j.job_id}')">Resume</button>` : ""}
-          ${j.output_file ? `<a href="/api/results/download?file_path=${encodeURIComponent(j.output_file)}&token=${encodeURIComponent(authToken)}" class="btn btn-cyan" style="padding: 2px 8px; font-size: 11.5px; text-decoration: none;" download>Download</a>` : ""}
-        </td>
-      `;
-      tbody.appendChild(tr);
-    });
+    cachedJobs = data.jobs || [];
+    renderJobHistoryTable();
   } catch (e) {
     console.error(e);
   }
+}
+
+function renderJobHistoryTable(filterQuery = "") {
+  const tbody = document.getElementById("historyTableBody");
+  tbody.innerHTML = "";
+
+  const filtered = filterQuery
+    ? cachedJobs.filter((j) => {
+        return (
+          (j.job_id && j.job_id.toLowerCase().includes(filterQuery)) ||
+          (j.target_path && j.target_path.toLowerCase().includes(filterQuery)) ||
+          (j.output_file && j.output_file.toLowerCase().includes(filterQuery)) ||
+          (j.status && j.status.toLowerCase().includes(filterQuery))
+        );
+      })
+    : cachedJobs;
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center text-dim">No job records matching filter.</td></tr>`;
+    return;
+  }
+
+  filtered.forEach((j) => {
+    const tr = document.createElement("tr");
+    const startedDate = j.started_at ? new Date(j.started_at * 1000).toLocaleString() : (j.created_at ? new Date(j.created_at * 1000).toLocaleString() : "--");
+    const outFileName = j.output_file ? j.output_file.split(/[\/\\]/).pop() : "--";
+
+    tr.innerHTML = `
+      <td class="font-mono" style="font-weight: 700;">${j.job_id}</td>
+      <td class="font-mono font-sm text-truncate" title="${j.target_path}">${j.target_path.length > 25 ? j.target_path.slice(0, 12) + "..." + j.target_path.slice(-12) : j.target_path}</td>
+      <td class="font-mono font-sm text-cyan" title="${j.output_file}">${outFileName}</td>
+      <td class="font-sm text-muted">${startedDate}</td>
+      <td><span class="status-pill status-${j.status.toLowerCase()}">${j.status}</span></td>
+      <td class="font-mono">${j.total_matches.toLocaleString()}</td>
+      <td class="font-mono">${j.progress_percent}%</td>
+      <td class="text-right">
+        <div style="display: flex; gap: 6px; justify-content: flex-end;">
+          ${j.status === "PAUSED" ? `<button class="btn btn-secondary btn-sm" onclick="resumeJob('${j.job_id}')">Resume</button>` : ""}
+          ${j.output_file ? `<a href="/api/results/download?file_path=${encodeURIComponent(j.output_file)}&token=${encodeURIComponent(authToken)}" class="btn btn-cyan btn-sm" download>Download</a>` : ""}
+          <button class="btn btn-danger btn-sm" onclick="deleteJobRecord('${j.job_id}')" title="Delete record and output file">Delete</button>
+        </div>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
 }
 
 window.resumeJob = async (jobId) => {
@@ -473,7 +511,23 @@ window.resumeJob = async (jobId) => {
   switchTab("liveMonitorTab");
 };
 
-// --- Filesystem & Resumable Chunked Upload ---
+window.deleteJobRecord = async (jobId) => {
+  if (confirm(`Permanently delete job ${jobId} and its generated result file from the server?`)) {
+    try {
+      const res = await apiFetch(`/api/jobs/${jobId}?delete_file=true`, { method: "DELETE" });
+      if (res.ok) {
+        appendTerminal(`[History] Job ${jobId} and its result file deleted.`);
+        loadJobHistory();
+      } else {
+        alert("Failed to delete job.");
+      }
+    } catch (e) {
+      alert("Error deleting job: " + e.message);
+    }
+  }
+};
+
+// --- Filesystem & Multi-File Chunked Upload with Destination Folder ---
 function initFileManager() {
   const dropzone = document.getElementById("uploadDropzone");
   const fileInput = document.getElementById("fileUploadInput");
@@ -491,51 +545,73 @@ function initFileManager() {
     e.preventDefault();
     dropzone.classList.remove("dragover");
     if (e.dataTransfer.files.length > 0) {
-      handleChunkedUpload(e.dataTransfer.files[0]);
+      handleBatchUpload(Array.from(e.dataTransfer.files));
     }
   });
 
   fileInput.addEventListener("change", () => {
     if (fileInput.files.length > 0) {
-      handleChunkedUpload(fileInput.files[0]);
+      handleBatchUpload(Array.from(fileInput.files));
+      fileInput.value = "";
     }
   });
 }
 
-async function handleChunkedUpload(file) {
+window.useCurrentExplorerPathAsUploadDir = () => {
+  const targetDirInput = document.getElementById("uploadTargetDir");
+  if (currentExplorerDirectory) {
+    targetDirInput.value = currentExplorerDirectory;
+  }
+};
+
+async function handleBatchUpload(files) {
+  const targetDir = document.getElementById("uploadTargetDir").value.trim() || "uploads";
+  const progressContainer = document.getElementById("uploadProgressContainer");
+  const queueStatus = document.getElementById("uploadQueueStatus");
+  progressContainer.style.display = "block";
+
+  appendTerminal(`[Batch Upload] Starting queue of ${files.length} file(s) into: ${targetDir}`);
+
+  for (let idx = 0; idx < files.length; idx++) {
+    const file = files[idx];
+    queueStatus.textContent = `Processing file ${idx + 1} of ${files.length}...`;
+    await uploadSingleFileChunked(file, targetDir);
+  }
+
+  queueStatus.textContent = `All ${files.length} file(s) uploaded successfully!`;
+  loadDirectory(currentExplorerDirectory);
+}
+
+async function uploadSingleFileChunked(file, targetDir) {
   const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB chunks
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
   const uploadId = `upload_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-  const progressContainer = document.getElementById("uploadProgressContainer");
   const fileNameEl = document.getElementById("uploadFileName");
   const percentEl = document.getElementById("uploadPercent");
   const barEl = document.getElementById("uploadProgressBar");
 
-  progressContainer.style.display = "block";
   fileNameEl.textContent = `${file.name} (${(file.size / (1024 * 1024)).toFixed(1)} MB)`;
   percentEl.textContent = "0%";
   barEl.style.width = "0%";
 
-  appendTerminal(`[Upload] Starting resumable stream for ${file.name} (${totalChunks} chunks)...`);
+  appendTerminal(`[Upload] Uploading ${file.name} (${totalChunks} chunks) to ${targetDir}...`);
 
   // Step 1: Init Upload
-  const initRes = await fetch("/api/fs/upload/init", {
+  const initRes = await apiFetch("/api/fs/upload/init", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${authToken}`,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       upload_id: uploadId,
       filename: file.name,
       total_size: file.size,
       total_chunks: totalChunks,
+      target_dir: targetDir,
     }),
   });
 
   if (!initRes.ok) {
-    alert("Upload initialization failed.");
+    alert(`Failed to initialize upload for ${file.name}`);
     return;
   }
 
@@ -557,7 +633,7 @@ async function handleChunkedUpload(file) {
     });
 
     if (!chunkRes.ok) {
-      alert(`Error uploading chunk ${i + 1}/${totalChunks}`);
+      alert(`Error uploading chunk ${i + 1}/${totalChunks} for ${file.name}`);
       return;
     }
 
@@ -567,21 +643,67 @@ async function handleChunkedUpload(file) {
   }
 
   // Step 3: Finalize
-  const finalRes = await fetch("/api/fs/upload/complete", {
+  const finalRes = await apiFetch("/api/fs/upload/complete", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${authToken}`,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ upload_id: uploadId }),
   });
 
   if (finalRes.ok) {
-    appendTerminal(`[Upload Completed] File saved on server: ${file.name}`);
-    loadDirectory();
+    appendTerminal(`[Upload Completed] Saved: ${file.name}`);
   }
 }
 
+// --- Remote URL Downloader ---
+function initUrlDownloader() {
+  const form = document.getElementById("urlDownloadForm");
+  const statusBox = document.getElementById("urlDownloadStatus");
+  const btn = document.getElementById("btnStartUrlDownload");
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const url = document.getElementById("remoteDownloadUrl").value.trim();
+    const target_dir = document.getElementById("remoteDownloadDir").value.trim() || "uploads";
+    const filename = document.getElementById("remoteCustomFilename").value.trim();
+
+    btn.disabled = true;
+    btn.textContent = "Downloading Stream...";
+    statusBox.style.display = "block";
+    statusBox.innerHTML = `<span class="text-cyan">Connecting to remote server and streaming to disk: ${url}...</span>`;
+    appendTerminal(`[URL Download] Fetching: ${url} into ${target_dir}...`);
+
+    try {
+      const res = await apiFetch("/api/fs/download-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, target_dir, filename }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const r = data.result;
+        statusBox.innerHTML = `
+          <strong class="text-emerald">Download Completed Successfully!</strong><br>
+          File: <span class="font-mono text-cyan">${r.filename}</span> (${(r.size_bytes / (1024 * 1024)).toFixed(2)} MB)<br>
+          Speed: <span class="font-mono">${r.speed_mb_s} MB/s</span> in ${r.elapsed_seconds}s<br>
+          Saved to: <span class="font-mono text-muted">${r.saved_path}</span>
+        `;
+        appendTerminal(`[URL Download Completed] ${r.filename} (${(r.size_bytes / (1024 * 1024)).toFixed(2)} MB @ ${r.speed_mb_s} MB/s)`);
+        loadDirectory(currentExplorerDirectory);
+        document.getElementById("remoteDownloadUrl").value = "";
+      } else {
+        statusBox.innerHTML = `<span class="text-rose">Error: ${data.detail || "Download failed"}</span>`;
+      }
+    } catch (err) {
+      statusBox.innerHTML = `<span class="text-rose">Network error: ${err.message}</span>`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Start Remote Download";
+    }
+  });
+}
+
+// --- Filesystem Explorer ---
 async function loadDirectory(path = "") {
   try {
     const url = path ? `/api/fs/browse?path=${encodeURIComponent(path)}` : "/api/fs/browse";
@@ -589,17 +711,21 @@ async function loadDirectory(path = "") {
     if (!res.ok) return;
 
     const data = await res.json();
+    currentExplorerDirectory = data.current_path;
     document.getElementById("fsCurrentPath").textContent = data.current_path;
+
     const tbody = document.getElementById("fsTableBody");
     tbody.innerHTML = "";
 
     if (data.parent_path) {
       const tr = document.createElement("tr");
       tr.innerHTML = `
-        <td style="cursor: pointer; color: var(--accent-cyan);" onclick="loadDirectory('${data.parent_path.replace(/\\/g, "/")}')">.. (Parent Directory)</td>
-        <td>Directory</td>
+        <td style="cursor: pointer; color: var(--accent-cyan); font-weight: 600;" onclick="loadDirectory('${data.parent_path.replace(/\\/g, "/")}')">.. (Parent Directory)</td>
+        <td>Folder</td>
         <td>--</td>
-        <td><button class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px;" onclick="selectAsTarget('${data.parent_path.replace(/\\/g, "/")}')">Select</button></td>
+        <td class="text-right">
+          <button class="btn btn-secondary btn-sm" onclick="selectAsTarget('${data.parent_path.replace(/\\/g, "/")}')">Set Search Target</button>
+        </td>
       `;
       tbody.appendChild(tr);
     }
@@ -610,14 +736,17 @@ async function loadDirectory(path = "") {
       const sizeStr = item.is_dir ? "--" : `${(item.size_bytes / (1024 * 1024)).toFixed(2)} MB`;
 
       tr.innerHTML = `
-        <td style="cursor: ${item.is_dir ? "pointer" : "default"}; color: ${item.is_dir ? "var(--accent-cyan)" : "var(--text-main)"};"
+        <td style="cursor: ${item.is_dir ? "pointer" : "default"}; color: ${item.is_dir ? "var(--accent-cyan)" : "var(--text-main)"}; font-weight: ${item.is_dir ? "600" : "400"};"
             ${item.is_dir ? `onclick="loadDirectory('${safePath}')"` : ""}>
-          ${item.name}
+          ${item.is_dir ? "&#128193; " : "&#128196; "} ${item.name}
         </td>
         <td>${item.is_dir ? "Directory" : "File"}</td>
-        <td style="font-family: var(--font-mono);">${sizeStr}</td>
-        <td>
-          <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px;" onclick="selectAsTarget('${safePath}')">Set Target</button>
+        <td class="font-mono font-sm">${sizeStr}</td>
+        <td class="text-right">
+          <div style="display: flex; gap: 6px; justify-content: flex-end;">
+            <button class="btn btn-secondary btn-sm" onclick="selectAsTarget('${safePath}')">Set Search Target</button>
+            ${item.is_dir ? `<button class="btn btn-secondary btn-sm" onclick="selectAsUploadFolder('${safePath}')">Upload Here</button>` : ""}
+          </div>
         </td>
       `;
       tbody.appendChild(tr);
@@ -632,7 +761,44 @@ window.selectAsTarget = (path) => {
   switchTab("searchStudioTab");
 };
 
-// --- Server Diagnostic Logs (Last 48 Hours) ---
+window.selectAsUploadFolder = (path) => {
+  document.getElementById("uploadTargetDir").value = path;
+  document.getElementById("remoteDownloadDir").value = path;
+  alert(`Storage destination set to: ${path}`);
+};
+
+// --- Server Diagnostic Logs & Log Clearing ---
+function initServerLogActions() {
+  const btnRefreshLogs = document.getElementById("btnRefreshServerLogs");
+  if (btnRefreshLogs) {
+    btnRefreshLogs.addEventListener("click", loadServerLogs);
+  }
+
+  const linesSelect = document.getElementById("logLinesSelect");
+  if (linesSelect) {
+    linesSelect.addEventListener("change", loadServerLogs);
+  }
+
+  const btnClearLogs = document.getElementById("btnClearServerLogs");
+  if (btnClearLogs) {
+    btnClearLogs.addEventListener("click", async () => {
+      if (confirm("Are you sure you want to permanently clear the server diagnostic log file?")) {
+        try {
+          const res = await apiFetch("/api/logs/clear", { method: "DELETE" });
+          if (res.ok) {
+            appendTerminal("[Server Logs] Audit logs cleared by administrator.");
+            loadServerLogs();
+          } else {
+            alert("Failed to clear logs.");
+          }
+        } catch (e) {
+          alert("Error clearing logs: " + e.message);
+        }
+      }
+    });
+  }
+}
+
 async function loadServerLogs() {
   const terminal = document.getElementById("serverLogTerminal");
   const linesCount = document.getElementById("logLinesSelect").value || 250;
@@ -648,16 +814,7 @@ async function loadServerLogs() {
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-  const btnRefreshLogs = document.getElementById("btnRefreshServerLogs");
-  if (btnRefreshLogs) {
-    btnRefreshLogs.addEventListener("click", loadServerLogs);
-  }
-  const linesSelect = document.getElementById("logLinesSelect");
-  if (linesSelect) {
-    linesSelect.addEventListener("change", loadServerLogs);
-  }
-});
+// --- System & Telegram Settings ---
 function initSettings() {
   document.getElementById("telegramSettingsForm").addEventListener("submit", async (e) => {
     e.preventDefault();

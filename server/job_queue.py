@@ -249,6 +249,28 @@ class JobQueueManager:
                 return True
         return False
 
+    def delete_job(self, job_id: str, delete_file: bool = True) -> bool:
+        """Deletes a job record and optionally removes its generated output file from disk."""
+        with self._lock:
+            job = self._jobs.pop(job_id, None)
+            self._active_managers.pop(job_id, None)
+            self._threads.pop(job_id, None)
+
+        # Remove checkpoint
+        self.checkpoint_manager.remove(job_id)
+
+        # Remove output file from disk
+        if job and delete_file and job.output_file:
+            try:
+                p = Path(job.output_file)
+                if p.exists() and p.is_file():
+                    p.unlink()
+                    logger.info("Deleted output file for job %s: %s", job_id, p)
+            except Exception as e:
+                logger.warning("Could not delete output file %s: %s", job.output_file, e)
+
+        return True if job else False
+
     def _handle_progress(self, progress_data: Dict[str, Any]) -> None:
         """Receives progress events and updates job info & rate-limited WebSocket broadcast."""
         job_id = progress_data.get("job_id")

@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -241,6 +242,20 @@ async def get_recent_server_logs(lines: int = Query(200, ge=10, le=2000), author
     return {"logs": read_recent_logs(max_lines=lines)}
 
 
+@app.delete("/api/logs/clear")
+async def clear_server_logs(authorized: bool = Depends(require_admin)):
+    """Clears the server log file contents safely."""
+    from .logger import SERVER_LOG_FILE
+    try:
+        if SERVER_LOG_FILE.exists():
+            with open(SERVER_LOG_FILE, "w", encoding="utf-8") as f:
+                f.write(f"=== Logs cleared by administrator at {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())} ===\n")
+        logger.info("Server logs cleared by administrator.")
+        return {"success": True, "message": "Server logs cleared successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to clear logs: {e}")
+
+
 # --- Search Job Management Endpoints ---
 @app.post("/api/jobs/start")
 async def start_search_job(payload: Dict[str, Any], authorized: bool = Depends(require_admin)):
@@ -311,6 +326,33 @@ async def stop_job(job_id: str, authorized: bool = Depends(require_admin)):
     if not ok:
         raise HTTPException(status_code=404, detail="Job not found or already stopped.")
     return {"success": True, "job_id": job_id, "status": "STOPPED"}
+
+
+@app.delete("/api/jobs/{job_id}")
+async def delete_job(job_id: str, delete_file: bool = Query(True), authorized: bool = Depends(require_admin)):
+    """Deletes a job from history and optionally removes its generated output file from server disk."""
+    ok = job_queue.delete_job(job_id, delete_file=delete_file)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Job not found in history.")
+    return {"success": True, "message": f"Job {job_id} deleted successfully."}
+
+
+# --- Remote URL Download Endpoint ---
+@app.post("/api/fs/download-url")
+async def download_file_from_url(payload: Dict[str, Any], authorized: bool = Depends(require_admin)):
+    """Downloads a file directly from a remote HTTP/HTTPS URL and stores it on server."""
+    url = payload.get("url", "").strip()
+    if not url or not (url.startswith("http://") or url.startswith("https://")):
+        raise HTTPException(status_code=400, detail="A valid HTTP/HTTPS URL is required.")
+
+    target_dir = payload.get("target_dir")
+    custom_filename = payload.get("filename")
+
+    try:
+        res = file_mgr.download_from_url(url=url, target_dir=target_dir, custom_filename=custom_filename)
+        return {"success": True, "result": res}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # --- Results & Download Endpoints ---
