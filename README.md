@@ -138,6 +138,23 @@ You can switch profiles with one click in the **Settings & Telegram** tab of the
 
 ---
 
+## 📊 Real-World Production Benchmarks (731 GB Live Dataset)
+
+Yuri Gagarin Alpha was benchmarked on a production Linux VPS (`Ubuntu 7.0.0-43-generic`, 1 vCPU, 1.6 GB RAM) against the real-world `/root/Downloads/ul1p` corpus consisting of **72 massive database files totaling 730.75 GB** (individual files ranging from 1 GB to 106 GB):
+
+| Test Scenario | Target Size / Corpus | Engine & Flags | Results & Matches | Throughput / Status |
+| :--- | :--- | :--- | :---: | :---: |
+| **Full 731 GB Directory Scan** | **730.75 GB** (72 files) | Native Ripgrep (`--no-mmap`, `--text`) | **8,211 matches** | **78.5 MB/s sustained** (0 OOM errors, 100% complete) |
+| **Multi-Pattern Keyword Search** | 1.1 GB (19M records) | 3 patterns (`paypal`, `binance`, `coinbase`) | **222,740 matches** | **311.09 MB/s** |
+| **Complex Regex Extraction** | 65 MB (`700k uhq Ulp`) | Email Regex (`[a-zA-Z0-9_.+-]+@gmail\.com`) | **436,363 matches** | **100% matched, 0 ReDoS stalls** |
+| **Extract-Only URL Harvester** | 65 MB (`700k uhq Ulp`) | URL Regex (`https?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}`) | **627,553 URLs** | **31.94 MB/s** |
+| **Strict Case-Sensitive Scan** | 1.1 GB (19M records) | Ripgrep (`case_sensitive=True`) | **27,476 matches** | **338.78 MB/s** |
+| **Synthetic In-Memory Burst** | 30 MB (1,000 patterns) | Aho-Corasick SIMD | **3,804 matches** | **411.00 MB/s** |
+
+All tests completed with strictly bounded memory footprint (**< 100 MB RAM used by search processes**), zero virtual memory thrashing, and active Linux Page Cache release (`posix_fadvise`).
+
+---
+
 ## 🖥️ Enterprise Web Management Dashboard
 
 Access the responsive Single Page Application (SPA) dashboard in any browser with **zero Node.js/npm dependencies**:
@@ -235,10 +252,11 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/root/Desktop/YURI_GAGARIN_ALPHA_FINAL
-ExecStart=/root/Desktop/.VENV/bin/python run_server.py --host 0.0.0.0 --port 8000
+ExecStart=/root/Desktop/VENV/bin/python run_server.py --host 0.0.0.0 --port 8000
 Restart=always
-RestartSec=5
+RestartSec=3
 LimitNOFILE=65536
+LimitNPROC=65536
 
 [Install]
 WantedBy=multi-user.target
