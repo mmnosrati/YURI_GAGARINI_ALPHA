@@ -77,7 +77,7 @@ class JobQueueManager:
         self._restore_from_checkpoints()
 
     def _restore_from_checkpoints(self) -> None:
-        """Restores unfinished jobs from existing checkpoint files."""
+        """Restores unfinished jobs from existing checkpoint files and completed outputs."""
         for cp in self.checkpoint_manager.list_checkpoints():
             if cp.job_id not in self._jobs:
                 self._jobs[cp.job_id] = JobInfo(
@@ -96,6 +96,42 @@ class JobQueueManager:
                     output_file=cp.output_file,
                     created_at=cp.created_at,
                 )
+
+        # Also populate history from existing files in output/ directory so finished jobs persist across restarts!
+        output_dir = Path(self.config.default_output_dir)
+        if output_dir.exists():
+            for f in output_dir.glob("search_*.txt"):
+                file_stem = f.stem
+                job_id = f"job_{file_stem}"
+                if job_id not in self._jobs:
+                    stat = f.stat()
+                    # Count matches from output file lines
+                    match_count = 0
+                    try:
+                        with open(f, "rb") as probe_f:
+                            while chunk := probe_f.read(4 * 1024 * 1024):
+                                match_count += chunk.count(b"\n")
+                    except Exception:
+                        pass
+
+                    self._jobs[job_id] = JobInfo(
+                        job_id=job_id,
+                        target_path=f"Historical Result ({f.name})",
+                        patterns=[file_stem.replace("search_", "")],
+                        is_regex=False,
+                        status="COMPLETED",
+                        progress_percent=100.0,
+                        total_matches=match_count,
+                        bytes_processed=stat.st_size,
+                        total_bytes=stat.st_size,
+                        current_file="Complete",
+                        file_index=1,
+                        total_files=1,
+                        output_file=str(f),
+                        created_at=stat.st_mtime,
+                        started_at=stat.st_mtime,
+                        completed_at=stat.st_mtime,
+                    )
 
     def get_job(self, job_id: str) -> Optional[JobInfo]:
         with self._lock:
