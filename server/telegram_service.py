@@ -131,7 +131,7 @@ class TelegramService:
     def send_output_file_multipart(self, output_file: Path, summary_stats: Dict[str, Any]) -> bool:
         """
         Splits output files larger than 45 MB into consecutive parts and uploads them.
-        Includes complete mission statistics, timestamp, target, and matches in the caption.
+        Includes complete mission statistics, search pattern, top matched files, and hits in the caption.
         """
         if not self.enabled or not output_file.exists():
             return False
@@ -142,19 +142,55 @@ class TelegramService:
         matches = summary_stats.get("total_matches", 0)
         target = summary_stats.get("target_path", "Unknown")
         job_id = summary_stats.get("job_id", "N/A")
+        patterns = summary_stats.get("patterns", [])
         now_str = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
 
+        # Build searched pattern presentation
+        pat_lines = []
+        if patterns:
+            for idx, p in enumerate(patterns[:3], start=1):
+                is_multi = "\n" in p or "\r" in p
+                p_display = (p[:50] + "...") if len(p) > 50 else p
+                p_display = p_display.replace("\r\n", "\\n").replace("\n", "\\n")
+                tag = " *(Multi-line)*" if is_multi else ""
+                pat_lines.append(f"  {idx}. `{p_display}`{tag}")
+            if len(patterns) > 3:
+                pat_lines.append(f"  ... (+{len(patterns) - 3} more)")
+
+        patterns_str = "\n".join(pat_lines) if pat_lines else "`None / Empty`"
+
+        # Extract top matched files
+        file_stats = summary_stats.get("file_statistics", {})
+        top_files_lines = []
+        if file_stats:
+            sorted_files = sorted(
+                file_stats.items(),
+                key=lambda x: x[1].get("matches", 0) if isinstance(x[1], dict) else x[1],
+                reverse=True,
+            )[:3]
+            for rank, (fname, f_info) in enumerate(sorted_files, start=1):
+                f_hits = f_info.get("matches", 0) if isinstance(f_info, dict) else f_info
+                pct = (f_hits / max(1, matches)) * 100
+                top_files_lines.append(f"  {rank}. `{fname}`: *{f_hits:,}* hits ({pct:.1f}%)")
+
+        top_files_str = "\n".join(top_files_lines) if top_files_lines else "  • `Target file/stream`"
+
         caption = (
-            f"🔍 *YURI GAGARIN ALPHA - SEARCH MISSION REPORT*\n\n"
+            f"🚀 *YURI GAGARIN ALPHA - MISSION REPORT*\n\n"
             f"• *Job ID*: `{job_id}`\n"
             f"• *Target*: `{target}`\n"
             f"• *Total Matches*: `{matches:,}`\n"
             f"• *Execution Time*: `{elapsed:.2f}s`\n"
-            f"• *Average Throughput*: `{speed:.2f} MB/s`\n"
-            f"• *Output File*: `{output_file.name}`\n"
-            f"• *File Size*: `{size_bytes / (1024 * 1024):.2f} MB`\n"
-            f"• *Completed At*: `{now_str}`\n"
+            f"• *Throughput*: `{speed:.2f} MB/s`\n"
+            f"• *File Size*: `{size_bytes / (1024 * 1024):.2f} MB`\n\n"
+            f"🎯 *Search Patterns*:\n{patterns_str}\n\n"
+            f"🏆 *Top Matched Datasets*:\n{top_files_str}\n\n"
+            f"📅 *Finished*: `{now_str}`"
         )
+
+        # Enforce Telegram caption 1024 character limit strictly
+        if len(caption) > 1020:
+            caption = caption[:1015] + "..."
 
         if size_bytes <= self.MAX_FILE_SIZE_BYTES:
             return self.send_document(output_file, caption=caption)

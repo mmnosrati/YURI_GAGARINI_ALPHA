@@ -113,12 +113,6 @@ class RipgrepEngine:
         else:
             cmd.append("--no-mmap")
 
-        # Fixed strings vs Regex
-        if not is_regex:
-            cmd.append("--fixed-strings")
-        elif options.pcre2:
-            cmd.append("--pcre2")
-
         # Case Sensitivity
         if options.case_sensitive:
             cmd.append("--case-sensitive")
@@ -139,14 +133,38 @@ class RipgrepEngine:
         if not options.recursive:
             cmd.extend(["--max-depth", "1"])
 
-        # IMPORTANT: NEVER pass --multiline unless explicitly searching for patterns containing \n or \r!
-        # Ripgrep official docs: "WARNING: When multiline mode is enabled, ripgrep requires that each file
-        # is laid out contiguously in memory (either on heap or memory-mapped). On 800+ GB dumps, this triggers Linux OOM-Killer!"
-        has_multiline_pattern = is_regex and any(("\n" in p or "\\n" in p or "\\r" in p or "(?s)" in p) for p in patterns)
-        if has_multiline_pattern:
-            cmd.append("--multiline")
+        # Check if patterns contain multi-line plain text or multi-line regex expressions
+        has_multiline_pattern = any(("\n" in p or "\r" in p or (is_regex and ("\\n" in p or "\\r" in p or "(?s)" in p))) for p in patterns)
 
-        # Output formatting
+        # Fixed strings vs Regex
+        # If is_regex is False but pattern contains newlines, convert to cross-platform regex
+        # matching both \r\n and \n without falling into -F line-boundary limitations
+        active_patterns = patterns
+        effective_is_regex = is_regex
+
+        if not is_regex and has_multiline_pattern:
+            # Multi-line plain text: translate literal segments with flexible line-break regex
+            import re
+            translated = []
+            for p in patterns:
+                if "\n" in p or "\r" in p:
+                    lines = p.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+                    escaped_lines = [re.escape(l) for l in lines]
+                    translated.append(r"\r?\n".join(escaped_lines))
+                else:
+                    translated.append(re.escape(p))
+            active_patterns = translated
+            effective_is_regex = True
+            cmd.append("--multiline")
+            if options.pcre2:
+                cmd.append("--pcre2")
+        elif not is_regex:
+            cmd.append("--fixed-strings")
+        else:
+            if options.pcre2:
+                cmd.append("--pcre2")
+            if has_multiline_pattern:
+                cmd.append("--multiline")
         effective_format = options.output_format
         if options.extract_only:
             effective_format = "extract_only"
@@ -167,10 +185,10 @@ class RipgrepEngine:
         # Add Patterns
         if patterns_file and patterns_file.exists():
             cmd.extend(["-f", str(patterns_file)])
-        elif len(patterns) == 1:
-            cmd.extend(["-e", patterns[0]])
+        elif len(active_patterns) == 1:
+            cmd.extend(["-e", active_patterns[0]])
         else:
-            for p in patterns:
+            for p in active_patterns:
                 cmd.extend(["-e", p])
 
         # Target Path
@@ -248,8 +266,17 @@ class RipgrepEngine:
         preexec = self._get_linux_preexec(opts.nice_level)
         initial_size = output_file.stat().st_size if output_file.exists() and append else 0
 
+        # Count line-level multiplier for multi-line patterns so match count reflects occurrences
+        has_multiline_pattern = any(("\n" in p or "\r" in p or (is_regex and ("\\n" in p or "\\r" in p or "(?s)" in p))) for p in patterns)
+        lines_per_match = 1
+        if has_multiline_pattern:
+            for p in patterns:
+                nl_count = p.count("\n")
+                if nl_count > 0:
+                    lines_per_match = max(lines_per_match, nl_count + 1)
         current_matches = 0
         last_counted_offset = initial_size
+        total_matched_lines = 0
 
         try:
             with open(output_file, mode) as out_f:
@@ -288,7 +315,8 @@ class RipgrepEngine:
                                     probe_f.seek(last_counted_offset)
                                     chunk = probe_f.read(current_out_size - last_counted_offset)
                                     if chunk:
-                                        current_matches += chunk.count(b"\n")
+                                        total_matched_lines += chunk.count(b"\n")
+                                        current_matches = total_matched_lines // lines_per_match
                                         last_counted_offset += len(chunk)
 
                             progress_callback({
@@ -335,7 +363,8 @@ class RipgrepEngine:
                             chunk = probe_f.read(buf_size)
                             if not chunk:
                                 break
-                            current_matches += chunk.count(b"\n")
+                            total_matched_lines += chunk.count(b"\n")
+                        current_matches = total_matched_lines // lines_per_match
                 except Exception:
                     pass
 

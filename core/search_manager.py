@@ -296,6 +296,7 @@ class SearchManager:
             # guarantees 100% accurate live progress, file names, ETA, and RAM page-cache release!
             total_matches = 0
             scanned_bytes = 0
+            file_matches_map: Dict[str, int] = {}
             last_progress_emit = [0.0]
 
             # Send initial starting telemetry
@@ -350,10 +351,12 @@ class SearchManager:
                     stop_event=self._stop_requested,
                     append=False,
                 )
+                if total_matches > 0:
+                    file_matches_map[target.name] = total_matches
             else:
                 # Directory execution: iterate over files sequentially
                 # Ensures accurate per-file telemetry, granular progress percentage, and Linux Page Cache purge
-                batches = self._batch_files(files, max_batch_size_mb=100, max_files=10)
+                batches = self._batch_files(files, max_batch_size_mb=100, max_files=1 if len(files) < 20 else 10)
                 file_idx_counter = 0
 
                 for b_idx, batch in enumerate(batches):
@@ -406,6 +409,11 @@ class SearchManager:
                     total_matches += b_matches
                     scanned_bytes += batch_bytes
                     file_idx_counter += len(batch)
+                    if b_matches > 0:
+                        if len(batch) == 1:
+                            file_matches_map[batch[0].name] = file_matches_map.get(batch[0].name, 0) + b_matches
+                        else:
+                            file_matches_map[curr_file_name] = file_matches_map.get(curr_file_name, 0) + b_matches
 
                     # Release OS page cache for scanned batch files on Linux
                     for f in batch:
@@ -436,6 +444,57 @@ class SearchManager:
                             "bytes_processed": scanned_bytes,
                             "total_bytes": total_bytes,
                         })
+
+            # Generate and prepend rich mission metadata header to output file before compression (only in full format modes)
+            if output_path.exists() and fmt != "extract_only":
+                try:
+                    # Sort top matched files by hit count
+                    top_files = sorted(file_matches_map.items(), key=lambda x: x[1], reverse=True)[:5]
+                    header_lines = [
+                        "=" * 78,
+                        " YURI GAGARIN ALPHA - ENTERPRISE BIG-DATA SEARCH MISSION REPORT",
+                        "=" * 78,
+                        f"• Job ID          : {self.job_id}",
+                        f"• Date (UTC)      : {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}",
+                        f"• Target Path     : {target}",
+                        f"• Total Files     : {len(files):,}",
+                        f"• Total Data Size : {total_bytes / (1024**3):.2f} GB ({total_bytes:,} bytes)",
+                        f"• Total Matches   : {total_matches:,}",
+                        f"• Engine Type     : {engine_mode}",
+                        f"• Output Format   : {fmt}",
+                        f"• Case Sensitive  : {self.config.case_sensitive}",
+                        f"• Patterns Count  : {len(self.config.patterns)}",
+                        "-" * 78,
+                        " SEARCH PATTERNS / KEYWORDS:",
+                    ]
+                    for idx, pat in enumerate(self.config.patterns[:10], start=1):
+                        is_multi = "\n" in pat or "\r" in pat
+                        tag = " [MULTILINE]" if is_multi else ""
+                        pat_repr = repr(pat)[1:-1] if is_multi else pat
+                        header_lines.append(f"  [{idx}] {pat_repr}{tag}")
+                    if len(self.config.patterns) > 10:
+                        header_lines.append(f"  ... and {len(self.config.patterns) - 10} more patterns.")
+
+                    if top_files:
+                        header_lines.append("-" * 78)
+                        header_lines.append(" TOP MATCHED FILES (HIGHEST DENSITY):")
+                        for rank, (fname, count) in enumerate(top_files, start=1):
+                            pct_hits = (count / max(1, total_matches)) * 100
+                            header_lines.append(f"  {rank}. {fname}: {count:,} matches ({pct_hits:.1f}%)")
+
+                    header_lines.append("=" * 78)
+                    header_lines.append("\n")
+                    header_bytes = "\n".join(header_lines).encode("utf-8")
+
+                    # Fast prepend using temp file (streamed in 8MB chunks, zero RAM overhead)
+                    temp_headed = output_path.with_name(f"tmp_headed_{output_path.name}")
+                    with open(temp_headed, "wb") as out_fh:
+                        out_fh.write(header_bytes)
+                        with open(output_path, "rb") as raw_fh:
+                            shutil.copyfileobj(raw_fh, out_fh, length=8 * 1024 * 1024)
+                    temp_headed.replace(output_path)
+                except Exception as e:
+                    logger.warning("Could not prepend mission header to output file: %s", e)
 
             # Post-process output (compression if enabled)
             final_output = output_path
@@ -468,14 +527,14 @@ class SearchManager:
                 patterns_count=len(self.config.patterns),
                 files_discovered=len(files),
                 files_searched=len(files),
-                files_with_matches=1 if total_matches > 0 else 0,
+                files_with_matches=len(file_matches_map) if file_matches_map else (1 if total_matches > 0 else 0),
                 total_bytes_scanned=total_bytes,
                 total_matches=total_matches,
                 elapsed_seconds=round(elapsed_total, 3),
                 throughput_mb_s=round(final_throughput, 2),
                 success=not self._stop_requested.is_set(),
                 errors=[],
-                file_statistics={},
+                file_statistics={k: {"matches": v} for k, v in file_matches_map.items()},
             )
 
         # Fallback to internal Python Aho-Corasick or Regex engine

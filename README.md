@@ -150,9 +150,15 @@ The primary accelerator utilizes Intel AVX2 and SSE2 hardware vector extensions:
 * **Teddy & Horspool Multi-Byte Skipping**: Evaluates 16 or 32 bytes in parallel in single CPU clock cycles.
 * **Direct OS Kernel Pipe Redirection**: Ripgrep streams matches straight into the output file descriptor on disk. Python does not parse individual output lines, allowing the system to achieve **over 1,000 MB/s sustained throughput**.
 * **Live Match Tracking**: While Ripgrep runs in a dedicated thread, a background prober samples the output file byte offsets every 400ms, counting newline increments (`\n`) to deliver live hit counter updates to the Web UI without interrupting I/O.
-* **Automatic PCRE2 Switch**: Fixed string patterns are dispatched with `--fixed-strings` (`-F`) for pure SIMD execution. Regular expressions automatically engage the **PCRE2 JIT** subsystem (`--pcre2`).
+* **Automatic PCRE2 & Multi-Line Translation**: Fixed single-line string patterns are dispatched with pure `--fixed-strings` (`-F`) for maximum SIMD throughput. Multi-line plain text searches are automatically converted to safe regex representations with `\r?\n` line-break tolerance and isolated `--multiline` flags, ensuring cross-platform CRLF/LF compatibility and zero OOM stalls.
 
-### 4.2 Fallback Aho-Corasick Engine (Memory-Bounded)
+### 4.2 Multi-Line Plain Text & Structured Log Mining
+Searching across multi-line blocks (e.g. stack traces, formatted SQL transactions, JSON payloads, or multi-line certificate headers) is supported natively:
+* **Automatic CRLF/LF Normalization**: If you query `START_TRANSACTION\nUPDATE accounts`, the engine automatically matches files saved with Windows `\r\n` or Unix `\n` line endings.
+* **Preserved Single-Line Performance**: Standard single-line searches never incur multiline allocation overhead.
+* **Match Occurrences Normalization**: Match counts accurately reflect individual multi-line block occurrences rather than counting every individual constituent line.
+
+### 4.3 Fallback Aho-Corasick Engine (Memory-Bounded)
 A standalone pure-Python implementation of the classic Aho-Corasick trie automaton:
 * Constructs a finite-state machine with failure links across all target keywords.
 * Guarantees linear time complexity $O(N + M)$ regardless of whether 1 pattern or 10,000 patterns are queried simultaneously.
@@ -309,7 +315,41 @@ Download files directly from public or private HTTP/HTTPS URLs onto the server d
 
 ---
 
-## 10. Output Formatting & Result Harvesting
+## 10. Output Formatting, Result Harvesting & Rich Metadata Header
+
+### Rich Output File Metadata Header
+Every generated output file (in `clean`, `separate`, or `prefix` formats) begins with an executive metadata banner prepended with zero memory buffering:
+```text
+==============================================================================
+ YURI GAGARIN ALPHA - ENTERPRISE BIG-DATA SEARCH MISSION REPORT
+==============================================================================
+• Job ID          : job_1732371234_9752
+• Date (UTC)      : 2026-11-23 17:35:10 UTC
+• Target Path     : /root/Downloads/ul1p
+• Total Files     : 72
+• Total Data Size : 730.75 GB (784,635,129,856 bytes)
+• Total Matches   : 8,211
+• Engine Type     : Ripgrep (fixed-strings)
+• Output Format   : clean
+• Case Sensitive  : False
+• Patterns Count  : 3
+------------------------------------------------------------------------------
+ SEARCH PATTERNS / KEYWORDS:
+  [1] paypal
+  [2] binance
+  [3] coinbase
+------------------------------------------------------------------------------
+ TOP MATCHED FILES (HIGHEST DENSITY):
+  1. database_dump_2026.txt: 4,512 matches (55.0%)
+  2. global_credentials.txt: 2,890 matches (35.2%)
+  3. users_harvested.sql: 809 matches (9.9%)
+==============================================================================
+
+admin@domain.com:Password123!
+billing@service.org:Secr3tToken
+```
+
+### Output Match Formats
 
 Configure how extracted matches appear in the output file:
 
@@ -342,7 +382,7 @@ Outputs strictly the matching expression rather than the full containing line (e
 
 ---
 
-## 11. Telegram Bot Dispatcher & 45 MB Multipart Deliveries
+## 11. Telegram Bot Dispatcher & Rich Mission Reporting (45 MB Multipart)
 
 Configure the integrated Telegram Bot in the **Settings & Telegram** tab:
 
@@ -352,10 +392,37 @@ Configure the integrated Telegram Bot in the **Settings & Telegram** tab:
 ├─────────────────────────────────────────────────────────────────────────────┤
 │ 🚀 Job Start Alert   : Notifies Chat ID of target path, engine, and patterns│
 │ ⚠️ RAM Safety Alert   : Triggers if host memory crosses throttle threshold  │
-│ 📊 Mission Finish    : Dispatches total hits, elapsed time, and avg MB/s    │
+│ 📊 Mission Finish    : Detailed Markdown caption with patterns & Top Files: │
+│                        • Searched Pattern (Single-line or Multi-line tag)   │
+│                        • Top Matched Datasets (% density breakdown)         │
+│                        • Job ID, Target, Elapsed time, and Throughput MB/s  │
 │ 📦 45 MB Multipart   : Files > 45MB are cleanly sliced into parts:         │
 │                        output_part001_of_004.txt, part002... and delivered │
 └─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Example Telegram Caption:
+```text
+🚀 YURI GAGARIN ALPHA - MISSION REPORT
+
+• Job ID: job_1732371234_9752
+• Target: /root/Downloads/ul1p
+• Total Matches: 8,211
+• Execution Time: 9.31s
+• Throughput: 785.40 MB/s
+• File Size: 1.24 MB
+
+🎯 Search Patterns:
+  1. `paypal`
+  2. `binance`
+  3. `coinbase`
+
+🏆 Top Matched Datasets:
+  1. `database_dump_2026.txt`: 4,512 hits (55.0%)
+  2. `global_credentials.txt`: 2,890 hits (35.2%)
+  3. `users_harvested.sql`: 809 hits (9.9%)
+
+📅 Finished: 2026-11-23 17:35:10 UTC
 ```
 
 ---

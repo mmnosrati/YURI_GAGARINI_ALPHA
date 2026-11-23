@@ -208,9 +208,11 @@ class JobQueueManager:
 
             # Telegram delivery
             if self.telegram.enabled:
+                res_dict = asdict(res)
+                res_dict["patterns"] = manager.config.patterns
                 self.telegram.send_output_file_multipart(
                     Path(res.output_file),
-                    asdict(res),
+                    res_dict,
                 )
 
         except Exception as e:
